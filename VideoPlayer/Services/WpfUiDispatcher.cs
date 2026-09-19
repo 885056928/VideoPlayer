@@ -14,9 +14,53 @@ public sealed class WpfUiDispatcher : IUiDispatcher
 
     public bool CheckAccess() => _dispatcher.CheckAccess();
 
-    public void Post(Action action) => _dispatcher.BeginInvoke(action);
+    public void Post(Action action)
+    {
+        if (IsShuttingDown)
+        {
+            return;
+        }
 
-    public Task InvokeAsync(Action action) => _dispatcher.InvokeAsync(action).Task;
+        try
+        {
+            _dispatcher.BeginInvoke(action);
+        }
+        catch (InvalidOperationException) when (IsShuttingDown)
+        {
+            // The dispatcher shut down between the state check and enqueue.
+        }
+    }
 
-    public Task<T> InvokeAsync<T>(Func<T> action) => _dispatcher.InvokeAsync(action).Task;
+    public async Task InvokeAsync(Action action)
+    {
+        try
+        {
+            await _dispatcher.InvokeAsync(action).Task.ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsShutdownException(exception))
+        {
+            // Dispatcher shutdown cancels or aborts pending operations.
+        }
+    }
+
+    public async Task<T> InvokeAsync<T>(Func<T> action)
+    {
+        try
+        {
+            return await _dispatcher.InvokeAsync(action).Task.ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsShutdownException(exception))
+        {
+            return default!;
+        }
+    }
+
+    private bool IsShuttingDown =>
+        _dispatcher.HasShutdownStarted || _dispatcher.HasShutdownFinished;
+
+    private bool IsShutdownException(Exception exception)
+    {
+        return IsShuttingDown
+            && exception is OperationCanceledException or InvalidOperationException;
+    }
 }
