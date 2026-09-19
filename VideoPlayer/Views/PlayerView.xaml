@@ -16,9 +16,17 @@
                 <Button Content="播放" Command="{Binding PlayCommand}" Margin="4" />
                 <Button Content="暂停" Command="{Binding PauseCommand}" Margin="4" />
                 <Button Content="停止" Command="{Binding StopCommand}" Margin="4" />
-                <Slider Width="220" Minimum="0"
-                        Maximum="{Binding Duration.TotalSeconds}"
-                        Value="{Binding Position.TotalSeconds}" />
+                <Slider x:Name="SeekSlider"
+                        Width="220"
+                        Minimum="0"
+                        IsMoveToPointEnabled="True"
+                        Maximum="{Binding Duration.TotalSeconds, Mode=OneWay}"
+                        Value="{Binding PendingSeekPosition, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        PreviewMouseLeftButtonDown="SeekSlider_PreviewMouseLeftButtonDown"
+                        PreviewMouseLeftButtonUp="SeekSlider_PreviewMouseLeftButtonUp"
+                        LostMouseCapture="SeekSlider_LostMouseCapture"
+                        PreviewKeyDown="SeekSlider_PreviewKeyDown"
+                        PreviewKeyUp="SeekSlider_PreviewKeyUp" />
                 <TextBlock Foreground="White">
                     <Run Text="{Binding Position}" /><Run Text=" / " /><Run Text="{Binding Duration}" />
                 </TextBlock>

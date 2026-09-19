@@ -190,6 +190,74 @@ public sealed class PlayerServiceTests
         Assert.False(service.IsInitialized);
         Assert.Null(service.MediaPlayer);
     }
+    [Fact]
+    public async Task SetVolumeAsync_ClampsToBoundaries()
+    {
+        await using var service = CreateService();
+        var cases = new[]
+        {
+            (Input: -10, Expected: 0),
+            (Input: 0, Expected: 0),
+            (Input: 55, Expected: 55),
+            (Input: 100, Expected: 100),
+            (Input: 500, Expected: 100)
+        };
+
+        foreach (var item in cases)
+        {
+            var result = await service.SetVolumeAsync(item.Input);
+
+            Assert.True(result.IsSuccess);
+            Assert.Equal(item.Expected, service.Snapshot.Volume);
+        }
+    }
+
+    [Fact]
+    public async Task SetRateAsync_ClampsToBoundaries()
+    {
+        await using var service = CreateService();
+        var cases = new[]
+        {
+            (Input: 0.1, Expected: 0.5),
+            (Input: 0.5, Expected: 0.5),
+            (Input: 1.25, Expected: 1.25),
+            (Input: 2.0, Expected: 2.0),
+            (Input: 9.0, Expected: 2.0),
+            (Input: double.NaN, Expected: 1.0),
+            (Input: double.PositiveInfinity, Expected: 1.0),
+            (Input: double.NegativeInfinity, Expected: 1.0)
+        };
+
+        foreach (var item in cases)
+        {
+            var result = await service.SetRateAsync(item.Input);
+
+            Assert.True(result.IsSuccess);
+            Assert.Equal(item.Expected, service.Snapshot.Rate);
+        }
+    }
+
+    [Fact]
+    public async Task SeekAsync_WhenMediaIsUnseekable_ReturnsSeekNotAvailable()
+    {
+        var path = CreateTempMediaFile();
+        await using var service = CreateService();
+
+        try
+        {
+            var opened = await service.OpenAsync(CreateRequest(path));
+            Assert.True(opened.IsSuccess);
+
+            var result = await service.SeekAsync(TimeSpan.FromSeconds(1));
+
+            Assert.False(result.IsSuccess);
+            Assert.Equal(ErrorCode.SeekNotAvailable, result.ErrorCode);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
     private static PlayerService CreateService()
     {
         return new PlayerService(

@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LibVLCSharp.Shared;
+using VideoPlayer.Helpers;
 using VideoPlayer.Interfaces;
 using VideoPlayer.Models;
 
@@ -9,11 +10,18 @@ namespace VideoPlayer.ViewModels;
 public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly IPlayerService _playerService;
+    private readonly IUiDispatcher _dispatcher;
+    private readonly SemaphoreSlim _progressGate = new(1, 1);
     private CancellationTokenSource? _progressCts;
+    private Task? _progressTask;
+    private int _disposed;
+    private bool _isSeeking;
+    private bool _isApplyingSnapshot;
 
-    public PlayerViewModel(IPlayerService playerService)
+    public PlayerViewModel(IPlayerService playerService, IUiDispatcher dispatcher)
     {
         _playerService = playerService;
+        _dispatcher = dispatcher;
     }
 
     public MediaPlayer? MediaPlayer => _playerService.MediaPlayer;
@@ -26,6 +34,9 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 
     [ObservableProperty]
     private TimeSpan _duration;
+
+    [ObservableProperty]
+    private double _pendingSeekPosition;
 
     [ObservableProperty]
     private int _volume = 80;
@@ -46,12 +57,18 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             ExternalSubtitlePath: null,
             PreferredAudioLanguage: null);
         var result = await _playerService.OpenAsync(request, cancellationToken);
-        LastError = result.IsSuccess ? string.Empty : result.UserMessage;
-
-        if (result.IsSuccess)
+        if (!result.IsSuccess)
         {
-            StartProgressRefresh();
+            LastError = result.UserMessage;
+            return;
         }
+
+        var volumeResult = await _playerService.SetVolumeAsync(Volume, cancellationToken);
+        var rateResult = await _playerService.SetRateAsync(Rate, cancellationToken);
+        var failedResult = !volumeResult.IsSuccess ? volumeResult : rateResult;
+        LastError = failedResult.IsSuccess ? string.Empty : failedResult.UserMessage;
+
+        await StartProgressRefreshAsync(cancellationToken);
     }
 
     [RelayCommand]
@@ -76,10 +93,35 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     }
 
     [RelayCommand]
-    public async Task SeekAsync(CancellationToken cancellationToken = default)
+    public Task SeekAsync(CancellationToken cancellationToken = default)
+        => SeekToAsync(Position, cancellationToken);
+
+    public void BeginSeek()
     {
-        var result = await _playerService.SeekAsync(Position, cancellationToken);
-        LastError = result.IsSuccess ? string.Empty : result.UserMessage;
+        if (_isSeeking)
+        {
+            return;
+        }
+
+        _isSeeking = true;
+        PendingSeekPosition = Position.TotalSeconds;
+    }
+
+    public Task CommitSeekAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_isSeeking)
+        {
+            return Task.CompletedTask;
+        }
+
+        _isSeeking = false;
+        var seconds = double.IsFinite(PendingSeekPosition)
+            ? PendingSeekPosition
+            : Position.TotalSeconds;
+        var target = PlaybackMath.ClampPosition(
+            TimeSpan.FromSeconds(seconds),
+            Duration);
+        return SeekToAsync(target, cancellationToken);
     }
 
     [RelayCommand]
@@ -90,11 +132,72 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         LastError = result.IsSuccess ? string.Empty : result.UserMessage;
     }
 
-    public void StartProgressRefresh()
+    public async Task StartProgressRefreshAsync(CancellationToken cancellationToken = default)
     {
-        _progressCts?.Cancel();
-        _progressCts = new CancellationTokenSource();
-        _ = RunProgressLoopAsync(_progressCts.Token);
+        await _progressGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await StopProgressLoopCoreAsync().ConfigureAwait(false);
+            if (IsDisposed)
+            {
+                return;
+            }
+
+            var progressCts = new CancellationTokenSource();
+            _progressCts = progressCts;
+            _progressTask = Task.Run(
+                () => RunProgressLoopAsync(progressCts.Token),
+                CancellationToken.None);
+        }
+        finally
+        {
+            _progressGate.Release();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        await _progressGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await StopProgressLoopCoreAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _progressGate.Release();
+        }
+    }
+
+    partial void OnVolumeChanged(int value)
+    {
+        if (_isApplyingSnapshot || IsDisposed)
+        {
+            return;
+        }
+
+        _ = ApplyVolumeAsync(value);
+    }
+
+    partial void OnRateChanged(double value)
+    {
+        if (_isApplyingSnapshot || IsDisposed)
+        {
+            return;
+        }
+
+        _ = ApplyRateAsync(value);
+    }
+
+    private async Task SeekToAsync(TimeSpan position, CancellationToken cancellationToken)
+    {
+        var result = await _playerService.SeekAsync(position, cancellationToken);
+        await UpdateLastErrorAsync(
+            result.IsSuccess ? string.Empty : result.UserMessage).ConfigureAwait(false);
     }
 
     private async Task RunProgressLoopAsync(CancellationToken cancellationToken)
@@ -102,35 +205,126 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(200));
         try
         {
-            while (await timer.WaitForNextTickAsync(cancellationToken))
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
                 var snapshot = _playerService.Snapshot;
+                cancellationToken.ThrowIfCancellationRequested();
+                await _dispatcher.InvokeAsync(() =>
+                {
+                    if (cancellationToken.IsCancellationRequested || IsDisposed)
+                    {
+                        return;
+                    }
+
+                    ApplySnapshot(snapshot);
+                }).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            await UpdateLastErrorAsync("播放进度更新失败。").ConfigureAwait(false);
+        }
+    }
+
+    private void ApplySnapshot(PlaybackSnapshot snapshot)
+    {
+        _isApplyingSnapshot = true;
+        try
+        {
+            if (!_isSeeking)
+            {
                 Position = snapshot.Position;
                 Duration = snapshot.Duration;
-                Volume = snapshot.Volume;
-                Rate = snapshot.Rate;
-                IsMuted = snapshot.IsMuted;
+            }
+
+            Volume = snapshot.Volume;
+            Rate = snapshot.Rate;
+            IsMuted = snapshot.IsMuted;
+        }
+        finally
+        {
+            _isApplyingSnapshot = false;
+        }
+    }
+
+    private async Task ApplyVolumeAsync(int value)
+    {
+        try
+        {
+            var result = await _playerService.SetVolumeAsync(value).ConfigureAwait(false);
+            await UpdateLastErrorAsync(
+                result.IsSuccess ? string.Empty : result.UserMessage).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            await UpdateLastErrorAsync("音量设置失败。").ConfigureAwait(false);
+        }
+    }
+
+    private async Task ApplyRateAsync(double value)
+    {
+        try
+        {
+            var result = await _playerService.SetRateAsync(value).ConfigureAwait(false);
+            await UpdateLastErrorAsync(
+                result.IsSuccess ? string.Empty : result.UserMessage).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            await UpdateLastErrorAsync("速率设置失败。").ConfigureAwait(false);
+        }
+    }
+
+    private async Task UpdateLastErrorAsync(string message)
+    {
+        try
+        {
+            await _dispatcher.InvokeAsync(() =>
+            {
+                if (!IsDisposed)
+                {
+                    LastError = message;
+                }
+            }).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private async Task StopProgressLoopCoreAsync()
+    {
+        var progressCts = _progressCts;
+        var progressTask = _progressTask;
+        _progressCts = null;
+        _progressTask = null;
+        if (progressCts is null)
+        {
+            return;
+        }
+
+        progressCts.Cancel();
+        try
+        {
+            if (progressTask is not null)
+            {
+                await progressTask.ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
         {
         }
+        catch (Exception)
+        {
+        }
+        finally
+        {
+            progressCts.Dispose();
+        }
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        _progressCts?.Cancel();
-        _progressCts?.Dispose();
-        await ValueTask.CompletedTask;
-    }
-
-    partial void OnVolumeChanged(int value)
-    {
-        _ = _playerService.SetVolumeAsync(value);
-    }
-
-    partial void OnRateChanged(double value)
-    {
-        _ = _playerService.SetRateAsync(value);
-    }
+    private bool IsDisposed => Volatile.Read(ref _disposed) != 0;
 }

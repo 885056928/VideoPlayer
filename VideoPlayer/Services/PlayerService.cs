@@ -27,6 +27,9 @@ public sealed class PlayerService : IPlayerService
     private Media? _media;
     private long _sessionId;
     private int _disposed;
+    private int _volume;
+    private bool _isMuted;
+    private double _rate = 1.0;
 
     public PlayerService(
         IUiDispatcher dispatcher,
@@ -38,6 +41,9 @@ public sealed class PlayerService : IPlayerService
         Core.Initialize();
         _libVlc = new LibVLC(vlcOptions ?? []);
         _mediaPlayer = new MediaPlayer(_libVlc);
+        _volume = _mediaPlayer.Volume;
+        _isMuted = _mediaPlayer.Mute;
+        _rate = _mediaPlayer.Rate;
     }
 
     public MediaPlayer? MediaPlayer
@@ -143,6 +149,7 @@ public sealed class PlayerService : IPlayerService
                 newMedia = null;
                 BindMediaPlayerEvents(sessionId);
                 _mediaPlayer.Media = _media;
+                ApplyPlaybackSettingsCore();
                 Transition(PlaybackState.Opening, sessionId);
                 PostMediaOpened(sessionId, path);
 
@@ -321,7 +328,8 @@ public sealed class PlayerService : IPlayerService
                     "PlayerService is disposed.");
             }
 
-            _mediaPlayer.Volume = PlaybackMath.ClampVolume(volume);
+            _volume = PlaybackMath.ClampVolume(volume);
+            _mediaPlayer.Volume = _volume;
             return ServiceResult.Success();
         }
         finally
@@ -345,7 +353,8 @@ public sealed class PlayerService : IPlayerService
                     "PlayerService is disposed.");
             }
 
-            _mediaPlayer.Mute = isMuted;
+            _isMuted = isMuted;
+            _mediaPlayer.Mute = _isMuted;
             return ServiceResult.Success();
         }
         finally
@@ -369,7 +378,8 @@ public sealed class PlayerService : IPlayerService
                     "PlayerService is disposed.");
             }
 
-            _mediaPlayer.SetRate((float)PlaybackMath.ClampRate(rate));
+            _rate = PlaybackMath.ClampRate(rate);
+            _mediaPlayer.SetRate((float)_rate);
             return ServiceResult.Success();
         }
         finally
@@ -706,9 +716,9 @@ public sealed class PlayerService : IPlayerService
             GetMediaPath(),
             GetPosition(),
             GetDuration(),
-            _mediaPlayer.Volume,
-            _mediaPlayer.Mute,
-            _mediaPlayer.Rate,
+            _volume,
+            _isMuted,
+            _rate,
             _mediaPlayer.IsSeekable,
             _mediaPlayer.VideoTrackCount > 0,
             _mediaPlayer.AudioTrackCount > 0,
@@ -730,6 +740,13 @@ public sealed class PlayerService : IPlayerService
             false,
             false,
             DateTimeOffset.UtcNow);
+    }
+
+    private void ApplyPlaybackSettingsCore()
+    {
+        _mediaPlayer.Volume = _volume;
+        _mediaPlayer.Mute = _isMuted;
+        _mediaPlayer.SetRate((float)_rate);
     }
 
     private bool HasMediaCore()

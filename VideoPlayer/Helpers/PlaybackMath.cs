@@ -21,5 +21,6 @@ public static class PlaybackMath
 
     public static int ClampVolume(int volume) => Math.Clamp(volume, 0, 100);
 
-    public static double ClampRate(double rate) => Math.Clamp(rate, 0.5, 2.0);
+    public static double ClampRate(double rate)
+        => double.IsFinite(rate) ? Math.Clamp(rate, 0.5, 2.0) : 1.0;
 }

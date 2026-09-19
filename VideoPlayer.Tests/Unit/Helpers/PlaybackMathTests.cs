@@ -16,11 +16,24 @@ public sealed class PlaybackMathTests
             PlaybackMath.ClampPosition(TimeSpan.FromSeconds(input), TimeSpan.FromSeconds(10)));
     }
 
-    [Fact]
-    public void ClampVolume_UsesZeroToOneHundred()
-        => Assert.Equal(100, PlaybackMath.ClampVolume(500));
+    [Theory]
+    [InlineData(-1, 0)]
+    [InlineData(0, 0)]
+    [InlineData(55, 55)]
+    [InlineData(100, 100)]
+    [InlineData(500, 100)]
+    public void ClampVolume_UsesZeroToOneHundred(int input, int expected)
+        => Assert.Equal(expected, PlaybackMath.ClampVolume(input));
 
-    [Fact]
-    public void ClampRate_UsesHalfToDouble()
-        => Assert.Equal(2.0, PlaybackMath.ClampRate(9.0));
+    [Theory]
+    [InlineData(0.1, 0.5)]
+    [InlineData(0.5, 0.5)]
+    [InlineData(1.25, 1.25)]
+    [InlineData(2.0, 2.0)]
+    [InlineData(9.0, 2.0)]
+    [InlineData(double.NaN, 1.0)]
+    [InlineData(double.PositiveInfinity, 1.0)]
+    [InlineData(double.NegativeInfinity, 1.0)]
+    public void ClampRate_UsesHalfToDoubleAndFiniteDefault(double input, double expected)
+        => Assert.Equal(expected, PlaybackMath.ClampRate(input));
 }
