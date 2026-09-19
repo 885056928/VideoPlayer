@@ -31,4 +31,10 @@ public sealed class PathHelperTests
     {
         Assert.Throws<ArgumentException>(() => PathHelper.NormalizePath("   "));
     }
+
+    [Fact]
+    public void NaturalCompare_OrdersMovie2BeforeMovie10()
+    {
+        Assert.True(PathHelper.NaturalCompare("Movie2.mkv", "Movie10.mkv") < 0);
+    }
 }
