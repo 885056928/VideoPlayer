@@ -15,6 +15,12 @@ public static class CompositionRoot
         services.AddSingleton(logger);
         services.AddSingleton<IFileService, FileService>();
         services.AddSingleton<ISettingsService, SettingsService>();
+        services.AddSingleton<IUiDispatcher>(_ =>
+            new WpfUiDispatcher(System.Windows.Application.Current.Dispatcher));
+        services.AddSingleton<IPlayerService>(provider =>
+            new PlayerService(
+                provider.GetRequiredService<IUiDispatcher>(),
+                provider.GetRequiredService<ILogger>()));
         return services.BuildServiceProvider(new ServiceProviderOptions
         {
             ValidateOnBuild = true,
