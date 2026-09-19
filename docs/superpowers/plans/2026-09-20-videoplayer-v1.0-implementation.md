@@ -161,7 +161,7 @@ Configure `VideoPlayer.Tests/VideoPlayer.Tests.csproj`:
     <PackageReference Include="coverlet.collector" Version="10.0.1">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Xunit.StaFact" Version="4.0.23" />
+    <PackageReference Include="Xunit.StaFact" Version="1.2.69" />
     <ProjectReference Include="..\VideoPlayer\VideoPlayer.csproj" />
   </ItemGroup>
 </Project>
@@ -235,6 +235,8 @@ Expected: FAIL because `VideoPlayer.Helpers.PathHelper` does not exist.
 Create `VideoPlayer/Helpers/PathHelper.cs`:
 
 ```csharp
+using System.IO;
+
 namespace VideoPlayer.Helpers;
 
 public static class PathHelper
@@ -818,6 +820,8 @@ Modify `VideoPlayer/Helpers/PathHelper.cs`:
 
 ```csharp
 using System.Runtime.InteropServices;
+
+using System.IO;
 
 namespace VideoPlayer.Helpers;
 
@@ -2723,6 +2727,8 @@ Expected: FAIL because `PlaybackMath` does not exist.
 Create `VideoPlayer/Helpers/PlaybackMath.cs`:
 
 ```csharp
+using System.IO;
+
 namespace VideoPlayer.Helpers;
 
 public static class PlaybackMath
@@ -5190,6 +5196,8 @@ Expected: FAIL because ScreenshotService does not exist.
 Create VideoPlayer/Helpers/FileNameHelper.cs:
 
 ~~~csharp
+using System.IO;
+
 namespace VideoPlayer.Helpers;
 
 public static class FileNameHelper
