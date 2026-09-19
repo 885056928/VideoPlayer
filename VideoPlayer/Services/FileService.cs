@@ -49,14 +49,6 @@ public sealed class FileService : IFileService
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (!Directory.Exists(folderPath))
-                {
-                    return ServiceResult<IReadOnlyList<string>>.Failure(
-                        ErrorCode.FileNotFound,
-                        "文件夹不存在。",
-                        folderPath);
-                }
-
                 var option = recursive
                     ? SearchOption.AllDirectories
                     : SearchOption.TopDirectoryOnly;
@@ -86,6 +78,14 @@ public sealed class FileService : IFileService
                 return ServiceResult<IReadOnlyList<string>>.Failure(
                     ErrorCode.Cancelled,
                     "操作已取消。",
+                    folderPath,
+                    exception);
+            }
+            catch (DirectoryNotFoundException exception)
+            {
+                return ServiceResult<IReadOnlyList<string>>.Failure(
+                    ErrorCode.FileNotFound,
+                    "文件夹不存在。",
                     folderPath,
                     exception);
             }

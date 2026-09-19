@@ -54,6 +54,22 @@ public sealed class FileServiceTests
     }
 
     [Fact]
+    public async Task EnumerateVideosAsync_ReturnsNoPermissionWhenTopLevelEnumerationIsDenied()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var service = new FileService(
+            (_, _) => throw new UnauthorizedAccessException("Access denied."));
+
+        var result = await service.EnumerateVideosAsync(
+            root,
+            false,
+            CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(ErrorCode.NoPermission, result.ErrorCode);
+    }
+
+    [Fact]
     public async Task EnumerateVideosAsync_ReturnsCancelledWhenTokenCanceledDuringEnumeration()
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
