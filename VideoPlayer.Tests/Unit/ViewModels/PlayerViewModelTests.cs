@@ -70,6 +70,26 @@ public sealed class PlayerViewModelTests
         public Task<ServiceResult> StopAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(ServiceResult.Success());
 
+        public Task<ServiceResult> SeekAsync(
+            TimeSpan position,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(ServiceResult.Success());
+
+        public Task<ServiceResult> SetVolumeAsync(
+            int volume,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(ServiceResult.Success());
+
+        public Task<ServiceResult> SetMuteAsync(
+            bool isMuted,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(ServiceResult.Success());
+
+        public Task<ServiceResult> SetRateAsync(
+            double rate,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(ServiceResult.Success());
+
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

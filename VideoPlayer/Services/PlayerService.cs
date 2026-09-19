@@ -269,6 +269,115 @@ public sealed class PlayerService : IPlayerService
         }
     }
 
+    public async Task<ServiceResult> SeekAsync(
+        TimeSpan position,
+        CancellationToken cancellationToken = default)
+    {
+        await _commandGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!IsInitialized)
+            {
+                return ServiceResult.Failure(
+                    ErrorCode.PlayerNotInitialized,
+                    "播放器未初始化。",
+                    "PlayerService is disposed.");
+            }
+
+            if (!HasMediaCore())
+            {
+                return ServiceResult.Failure(ErrorCode.InvalidState, "没有可播放的视频。", "No media");
+            }
+
+            if (!_mediaPlayer.IsSeekable || _mediaPlayer.Length <= 0)
+            {
+                return ServiceResult.Failure(ErrorCode.SeekNotAvailable, "当前视频不支持跳转。", "Not seekable");
+            }
+
+            var target = PlaybackMath.ClampPosition(
+                position,
+                TimeSpan.FromMilliseconds(_mediaPlayer.Length));
+            _mediaPlayer.Time = (long)target.TotalMilliseconds;
+            return ServiceResult.Success();
+        }
+        finally
+        {
+            _commandGate.Release();
+        }
+    }
+
+    public async Task<ServiceResult> SetVolumeAsync(
+        int volume,
+        CancellationToken cancellationToken = default)
+    {
+        await _commandGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!IsInitialized)
+            {
+                return ServiceResult.Failure(
+                    ErrorCode.PlayerNotInitialized,
+                    "播放器未初始化。",
+                    "PlayerService is disposed.");
+            }
+
+            _mediaPlayer.Volume = PlaybackMath.ClampVolume(volume);
+            return ServiceResult.Success();
+        }
+        finally
+        {
+            _commandGate.Release();
+        }
+    }
+
+    public async Task<ServiceResult> SetMuteAsync(
+        bool isMuted,
+        CancellationToken cancellationToken = default)
+    {
+        await _commandGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!IsInitialized)
+            {
+                return ServiceResult.Failure(
+                    ErrorCode.PlayerNotInitialized,
+                    "播放器未初始化。",
+                    "PlayerService is disposed.");
+            }
+
+            _mediaPlayer.Mute = isMuted;
+            return ServiceResult.Success();
+        }
+        finally
+        {
+            _commandGate.Release();
+        }
+    }
+
+    public async Task<ServiceResult> SetRateAsync(
+        double rate,
+        CancellationToken cancellationToken = default)
+    {
+        await _commandGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!IsInitialized)
+            {
+                return ServiceResult.Failure(
+                    ErrorCode.PlayerNotInitialized,
+                    "播放器未初始化。",
+                    "PlayerService is disposed.");
+            }
+
+            _mediaPlayer.SetRate((float)PlaybackMath.ClampRate(rate));
+            return ServiceResult.Success();
+        }
+        finally
+        {
+            _commandGate.Release();
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (!IsInitialized)
