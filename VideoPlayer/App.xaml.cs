@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using VideoPlayer.Configuration;
 using VideoPlayer.Interfaces;
+using VideoPlayer.ViewModels;
 
 namespace VideoPlayer;
 
@@ -39,7 +40,8 @@ public partial class App : Application
             var settings = _services.GetRequiredService<ISettingsService>();
             await settings.LoadAsync();
 
-            var window = new MainWindow(settings.Current);
+            var viewModel = _services.GetRequiredService<MainViewModel>();
+            var window = new MainWindow(viewModel);
             MainWindow = window;
             window.Show();
         }

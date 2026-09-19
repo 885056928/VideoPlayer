@@ -3,6 +3,7 @@ using Serilog;
 using VideoPlayer.Configuration;
 using VideoPlayer.Interfaces;
 using VideoPlayer.Services;
+using VideoPlayer.ViewModels;
 
 namespace VideoPlayer;
 
@@ -21,6 +22,8 @@ public static class CompositionRoot
             new PlayerService(
                 provider.GetRequiredService<IUiDispatcher>(),
                 provider.GetRequiredService<ILogger>()));
+        services.AddSingleton<PlayerViewModel>();
+        services.AddSingleton<MainViewModel>();
         return services.BuildServiceProvider(new ServiceProviderOptions
         {
             ValidateOnBuild = true,
