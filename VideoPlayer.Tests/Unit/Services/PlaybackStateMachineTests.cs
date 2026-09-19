@@ -34,6 +34,32 @@ public sealed class PlaybackStateMachineTests
         Assert.Equal(next, machine.Current);
     }
 
+    [Fact]
+    public async Task TryTransition_ConcurrentTransitionsCommitAtMostOnce()
+    {
+        for (var iteration = 0; iteration < 2_000; iteration++)
+        {
+            var machine = new PlaybackStateMachine(PlaybackState.Opening);
+            using var barrier = new Barrier(2);
+
+            var stopped = Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                return machine.TryTransition(PlaybackState.Stopped, out _);
+            });
+            var error = Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                return machine.TryTransition(PlaybackState.Error, out _);
+            });
+
+            var results = await Task.WhenAll(stopped, error);
+
+            Assert.True(
+                results.Count(result => result) == 1,
+                $"Iteration {iteration}: stopped={results[0]}, error={results[1]}, current={machine.Current}");
+        }
+    }
     [Theory]
     [InlineData(PlaybackState.None, PlaybackState.None, "Transition None -> None is not allowed.")]
     [InlineData(PlaybackState.None, PlaybackState.Playing, "Transition None -> Playing is not allowed.")]

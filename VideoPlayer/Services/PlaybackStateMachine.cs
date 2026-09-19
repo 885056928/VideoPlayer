@@ -16,23 +16,47 @@ public sealed class PlaybackStateMachine
             [PlaybackState.Error] = [PlaybackState.Opening]
         };
 
+    private readonly object _sync = new();
+    private PlaybackState _current;
+
     public PlaybackStateMachine(PlaybackState initial = PlaybackState.None)
     {
-        Current = initial;
+        _current = initial;
     }
 
-    public PlaybackState Current { get; private set; }
+    public PlaybackState Current
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _current;
+            }
+        }
+    }
 
     public bool TryTransition(PlaybackState next, out string? rejectionReason)
     {
-        if (Allowed.TryGetValue(Current, out var targets) && targets.Contains(next))
-        {
-            Current = next;
-            rejectionReason = null;
-            return true;
-        }
+        return TryTransition(next, out _, out rejectionReason);
+    }
 
-        rejectionReason = $"Transition {Current} -> {next} is not allowed.";
-        return false;
+    public bool TryTransition(
+        PlaybackState next,
+        out PlaybackState oldState,
+        out string? rejectionReason)
+    {
+        lock (_sync)
+        {
+            oldState = _current;
+            if (Allowed.TryGetValue(_current, out var targets) && targets.Contains(next))
+            {
+                _current = next;
+                rejectionReason = null;
+                return true;
+            }
+
+            rejectionReason = $"Transition {_current} -> {next} is not allowed.";
+            return false;
+        }
     }
 }

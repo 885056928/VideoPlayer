@@ -15,8 +15,15 @@ public sealed class PlayerService : IPlayerService
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _commandGate = new(1, 1);
     private readonly PlaybackStateMachine _stateMachine = new();
+    private readonly object _stateSync = new();
     private readonly LibVLC _libVlc;
     private readonly MediaPlayer _mediaPlayer;
+    private EventHandler<EventArgs>? _openingHandler;
+    private EventHandler<EventArgs>? _playingHandler;
+    private EventHandler<EventArgs>? _pausedHandler;
+    private EventHandler<EventArgs>? _stoppedHandler;
+    private EventHandler<EventArgs>? _endReachedHandler;
+    private EventHandler<EventArgs>? _encounteredErrorHandler;
     private Media? _media;
     private long _sessionId;
     private int _disposed;
@@ -31,15 +38,23 @@ public sealed class PlayerService : IPlayerService
         Core.Initialize();
         _libVlc = new LibVLC(vlcOptions ?? []);
         _mediaPlayer = new MediaPlayer(_libVlc);
-        _mediaPlayer.Opening += OnOpening;
-        _mediaPlayer.Playing += OnPlaying;
-        _mediaPlayer.Paused += OnPaused;
-        _mediaPlayer.Stopped += OnStopped;
-        _mediaPlayer.EndReached += OnEndReached;
-        _mediaPlayer.EncounteredError += OnEncounteredError;
     }
 
-    public MediaPlayer? MediaPlayer => _mediaPlayer;
+    public MediaPlayer? MediaPlayer
+    {
+        get
+        {
+            _commandGate.Wait();
+            try
+            {
+                return IsInitialized ? _mediaPlayer : null;
+            }
+            finally
+            {
+                _commandGate.Release();
+            }
+        }
+    }
 
     public bool IsInitialized => Volatile.Read(ref _disposed) == 0;
 
@@ -47,29 +62,33 @@ public sealed class PlayerService : IPlayerService
     {
         get
         {
-            if (!IsInitialized)
+            _commandGate.Wait();
+            try
             {
-                return false;
+                return IsInitialized && HasMediaCore();
             }
-
-            using var media = _mediaPlayer.Media;
-            return media is not null;
+            finally
+            {
+                _commandGate.Release();
+            }
         }
     }
 
-    public PlaybackSnapshot Snapshot => new(
-        Interlocked.Read(ref _sessionId),
-        _stateMachine.Current,
-        GetMediaPath(),
-        GetPosition(),
-        GetDuration(),
-        _mediaPlayer.Volume,
-        _mediaPlayer.Mute,
-        _mediaPlayer.Rate,
-        _mediaPlayer.IsSeekable,
-        _mediaPlayer.VideoTrackCount > 0,
-        _mediaPlayer.AudioTrackCount > 0,
-        DateTimeOffset.UtcNow);
+    public PlaybackSnapshot Snapshot
+    {
+        get
+        {
+            _commandGate.Wait();
+            try
+            {
+                return CreateSnapshot();
+            }
+            finally
+            {
+                _commandGate.Release();
+            }
+        }
+    }
 
     public event EventHandler<PlaybackStateChangedEventArgs>? StateChanged;
     public event EventHandler<MediaOpenedEventArgs>? MediaOpened;
@@ -112,37 +131,42 @@ public sealed class PlayerService : IPlayerService
                     path);
             }
 
-            _media?.Dispose();
-            _media = new Media(_libVlc, new Uri(path));
-            _mediaPlayer.Media = _media;
-            var sessionId = Interlocked.Increment(ref _sessionId);
-            Transition(PlaybackState.Opening, sessionId);
-
-            _dispatcher.Post(() => MediaOpened?.Invoke(
-                this,
-                new MediaOpenedEventArgs
-                {
-                    MediaSessionId = sessionId,
-                    FilePath = path,
-                    OccurredAtUtc = DateTimeOffset.UtcNow
-                }));
-
-            if (request.AutoPlay)
+            Media? newMedia = null;
+            var sessionId = 0L;
+            try
             {
-                _mediaPlayer.Play();
-            }
+                newMedia = new Media(_libVlc, new Uri(path));
+                sessionId = NextSessionId();
+                UnsubscribeMediaPlayerEvents();
+                _media?.Dispose();
+                _media = newMedia;
+                newMedia = null;
+                BindMediaPlayerEvents(sessionId);
+                _mediaPlayer.Media = _media;
+                Transition(PlaybackState.Opening, sessionId);
+                PostMediaOpened(sessionId, path);
 
-            return ServiceResult<MediaSessionInfo>.Success(
-                new MediaSessionInfo(
-                    sessionId,
-                    path,
-                    request.AutoPlay,
-                    request.StartPosition,
-                    DateTimeOffset.UtcNow));
+                if (request.AutoPlay)
+                {
+                    _mediaPlayer.Play();
+                }
+
+                return ServiceResult<MediaSessionInfo>.Success(
+                    new MediaSessionInfo(
+                        sessionId,
+                        path,
+                        request.AutoPlay,
+                        request.StartPosition,
+                        DateTimeOffset.UtcNow));
+            }
+            finally
+            {
+                newMedia?.Dispose();
+            }
         }
         catch (Exception exception)
         {
-            var sessionId = Interlocked.Read(ref _sessionId);
+            var sessionId = GetCurrentSessionId();
             _logger.Error(exception, "Failed to open media {Path}", request.FilePath);
             RaiseFailure(sessionId, ErrorCode.Unknown, "无法打开视频。", exception);
             return ServiceResult<MediaSessionInfo>.Failure(
@@ -171,7 +195,7 @@ public sealed class PlayerService : IPlayerService
                     "PlayerService is disposed.");
             }
 
-            if (!HasMedia)
+            if (!HasMediaCore())
             {
                 return ServiceResult.Failure(
                     ErrorCode.InvalidState,
@@ -234,8 +258,9 @@ public sealed class PlayerService : IPlayerService
                 return ServiceResult.Success();
             }
 
+            var sessionId = GetCurrentSessionId();
             _mediaPlayer.Stop();
-            Transition(PlaybackState.Stopped, Interlocked.Read(ref _sessionId));
+            Transition(PlaybackState.Stopped, sessionId);
             return ServiceResult.Success();
         }
         finally
@@ -251,7 +276,7 @@ public sealed class PlayerService : IPlayerService
             return;
         }
 
-        await _commandGate.WaitAsync();
+        await _commandGate.WaitAsync().ConfigureAwait(false);
         try
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0)
@@ -259,17 +284,11 @@ public sealed class PlayerService : IPlayerService
                 return;
             }
 
-            _mediaPlayer.Opening -= OnOpening;
-            _mediaPlayer.Playing -= OnPlaying;
-            _mediaPlayer.Paused -= OnPaused;
-            _mediaPlayer.Stopped -= OnStopped;
-            _mediaPlayer.EndReached -= OnEndReached;
-            _mediaPlayer.EncounteredError -= OnEncounteredError;
-            _mediaPlayer.Stop();
-            _mediaPlayer.Dispose();
-            _media?.Dispose();
-            _media = null;
-            _libVlc.Dispose();
+            UnsubscribeMediaPlayerEvents();
+            StateChanged = null;
+            MediaOpened = null;
+            PlaybackFailed = null;
+            DisposePlayerSafely();
         }
         finally
         {
@@ -277,46 +296,194 @@ public sealed class PlayerService : IPlayerService
         }
     }
 
-    private void OnOpening(object? sender, EventArgs e)
-        => Transition(PlaybackState.Opening, Interlocked.Read(ref _sessionId));
-
-    private void OnPlaying(object? sender, EventArgs e)
-        => Transition(PlaybackState.Playing, Interlocked.Read(ref _sessionId));
-
-    private void OnPaused(object? sender, EventArgs e)
-        => Transition(PlaybackState.Paused, Interlocked.Read(ref _sessionId));
-
-    private void OnStopped(object? sender, EventArgs e)
-        => Transition(PlaybackState.Stopped, Interlocked.Read(ref _sessionId));
-
-    private void OnEndReached(object? sender, EventArgs e)
-        => Transition(PlaybackState.Ended, Interlocked.Read(ref _sessionId));
-
-    private void OnEncounteredError(object? sender, EventArgs e)
+    internal void HandleMediaEvent(long sessionId, PlaybackState state)
     {
-        var sessionId = Interlocked.Read(ref _sessionId);
-        Transition(PlaybackState.Error, sessionId);
-        RaiseFailure(sessionId, ErrorCode.UnsupportedMedia, "视频无法播放。", null);
+        if (!IsCurrentSession(sessionId))
+        {
+            return;
+        }
+
+        try
+        {
+            Transition(state, sessionId);
+        }
+        catch (Exception exception)
+        {
+            HandleCallbackFailure(sessionId, exception);
+        }
+    }
+
+    internal void HandleMediaError(long sessionId)
+    {
+        if (!IsCurrentSession(sessionId))
+        {
+            return;
+        }
+
+        try
+        {
+            Transition(PlaybackState.Error, sessionId);
+            RaiseFailure(sessionId, ErrorCode.UnsupportedMedia, "视频无法播放。", null);
+        }
+        catch (Exception exception)
+        {
+            HandleCallbackFailure(sessionId, exception);
+        }
+    }
+
+    private void BindMediaPlayerEvents(long sessionId)
+    {
+        _openingHandler = (_, _) => HandleMediaEvent(sessionId, PlaybackState.Opening);
+        _playingHandler = (_, _) => HandleMediaEvent(sessionId, PlaybackState.Playing);
+        _pausedHandler = (_, _) => HandleMediaEvent(sessionId, PlaybackState.Paused);
+        _stoppedHandler = (_, _) => HandleMediaEvent(sessionId, PlaybackState.Stopped);
+        _endReachedHandler = (_, _) => HandleMediaEvent(sessionId, PlaybackState.Ended);
+        _encounteredErrorHandler = (_, _) => HandleMediaError(sessionId);
+
+        _mediaPlayer.Opening += _openingHandler;
+        _mediaPlayer.Playing += _playingHandler;
+        _mediaPlayer.Paused += _pausedHandler;
+        _mediaPlayer.Stopped += _stoppedHandler;
+        _mediaPlayer.EndReached += _endReachedHandler;
+        _mediaPlayer.EncounteredError += _encounteredErrorHandler;
+    }
+
+    private void UnsubscribeMediaPlayerEvents()
+    {
+        if (_openingHandler is not null)
+        {
+            _mediaPlayer.Opening -= _openingHandler;
+        }
+
+        if (_playingHandler is not null)
+        {
+            _mediaPlayer.Playing -= _playingHandler;
+        }
+
+        if (_pausedHandler is not null)
+        {
+            _mediaPlayer.Paused -= _pausedHandler;
+        }
+
+        if (_stoppedHandler is not null)
+        {
+            _mediaPlayer.Stopped -= _stoppedHandler;
+        }
+
+        if (_endReachedHandler is not null)
+        {
+            _mediaPlayer.EndReached -= _endReachedHandler;
+        }
+
+        if (_encounteredErrorHandler is not null)
+        {
+            _mediaPlayer.EncounteredError -= _encounteredErrorHandler;
+        }
+
+        _openingHandler = null;
+        _playingHandler = null;
+        _pausedHandler = null;
+        _stoppedHandler = null;
+        _endReachedHandler = null;
+        _encounteredErrorHandler = null;
+    }
+
+    private void DisposePlayerSafely()
+    {
+        TryDisposeNative(() => _mediaPlayer.Stop(), "stop MediaPlayer");
+        TryDisposeNative(() => _mediaPlayer.Dispose(), "dispose MediaPlayer");
+        TryDisposeNative(() => _media?.Dispose(), "dispose Media");
+        _media = null;
+        TryDisposeNative(() => _libVlc.Dispose(), "dispose LibVLC");
+    }
+
+    private void TryDisposeNative(Action action, string operation)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                _logger.Error(exception, "Failed to {Operation}.", operation);
+            }
+            catch
+            {
+                // Native disposal must continue even if logging fails.
+            }
+        }
     }
 
     private void Transition(PlaybackState next, long sessionId)
     {
-        var oldState = _stateMachine.Current;
-        if (!_stateMachine.TryTransition(next, out var reason))
+        if (!IsCurrentSession(sessionId))
         {
-            _logger.Debug("Ignored state transition: {Reason}", reason);
             return;
         }
 
-        _dispatcher.Post(() => StateChanged?.Invoke(
-            this,
-            new PlaybackStateChangedEventArgs
+        PlaybackState oldState;
+        string? reason;
+        lock (_stateSync)
+        {
+            if (Volatile.Read(ref _disposed) != 0 || _sessionId != sessionId)
             {
-                MediaSessionId = sessionId,
-                OldState = oldState,
-                NewState = next,
-                OccurredAtUtc = DateTimeOffset.UtcNow
-            }));
+                return;
+            }
+
+            if (!_stateMachine.TryTransition(next, out oldState, out reason))
+            {
+                _logger.Debug("Ignored state transition: {Reason}", reason);
+                return;
+            }
+        }
+
+        PostStateChanged(sessionId, oldState, next);
+    }
+
+    private void PostStateChanged(
+        long sessionId,
+        PlaybackState oldState,
+        PlaybackState newState)
+    {
+        _dispatcher.Post(() =>
+        {
+            if (!IsCurrentSession(sessionId))
+            {
+                return;
+            }
+
+            StateChanged?.Invoke(
+                this,
+                new PlaybackStateChangedEventArgs
+                {
+                    MediaSessionId = sessionId,
+                    OldState = oldState,
+                    NewState = newState,
+                    OccurredAtUtc = DateTimeOffset.UtcNow
+                });
+        });
+    }
+
+    private void PostMediaOpened(long sessionId, string path)
+    {
+        _dispatcher.Post(() =>
+        {
+            if (!IsCurrentSession(sessionId))
+            {
+                return;
+            }
+
+            MediaOpened?.Invoke(
+                this,
+                new MediaOpenedEventArgs
+                {
+                    MediaSessionId = sessionId,
+                    FilePath = path,
+                    OccurredAtUtc = DateTimeOffset.UtcNow
+                });
+        });
     }
 
     private void RaiseFailure(
@@ -325,22 +492,176 @@ public sealed class PlayerService : IPlayerService
         string message,
         Exception? exception)
     {
-        _dispatcher.Post(() => PlaybackFailed?.Invoke(
-            this,
-            new PlaybackFailedEventArgs
+        if (!IsCurrentSession(sessionId))
+        {
+            return;
+        }
+
+        try
+        {
+            _dispatcher.Post(() =>
             {
-                MediaSessionId = sessionId,
-                ErrorCode = code,
-                UserMessage = message,
-                TechnicalMessage = exception?.Message ?? message,
-                Exception = exception
-            }));
+                if (!IsCurrentSession(sessionId))
+                {
+                    return;
+                }
+
+                PlaybackFailed?.Invoke(
+                    this,
+                    new PlaybackFailedEventArgs
+                    {
+                        MediaSessionId = sessionId,
+                        ErrorCode = code,
+                        UserMessage = message,
+                        TechnicalMessage = exception?.Message ?? message,
+                        Exception = exception
+                    });
+            });
+        }
+        catch (Exception dispatchException)
+        {
+            TryLogCallbackFailure(
+                dispatchException,
+                "Failed to publish playback failure for media session {MediaSessionId}.",
+                sessionId);
+        }
+    }
+
+    private void HandleCallbackFailure(long sessionId, Exception exception)
+    {
+        if (!IsCurrentSession(sessionId))
+        {
+            return;
+        }
+
+        TryLogCallbackFailure(
+            exception,
+            "VLC callback failed for media session {MediaSessionId}.",
+            sessionId);
+
+        try
+        {
+            RaiseFailure(
+                sessionId,
+                ErrorCode.Unknown,
+                "播放器事件处理失败。",
+                exception);
+        }
+        catch (Exception failureException)
+        {
+            TryLogCallbackFailure(
+                failureException,
+                "Failed to publish VLC callback failure for media session {MediaSessionId}.",
+                sessionId);
+        }
+    }
+
+    private void TryLogCallbackFailure(
+        Exception exception,
+        string messageTemplate,
+        long sessionId)
+    {
+        try
+        {
+            _logger.Error(exception, messageTemplate, sessionId);
+        }
+        catch
+        {
+            // VLC callbacks must never observe managed logging failures.
+        }
+    }
+
+    private PlaybackSnapshot CreateSnapshot()
+    {
+        if (!IsInitialized)
+        {
+            return CreateDefaultSnapshot();
+        }
+
+        long sessionId;
+        PlaybackState state;
+        lock (_stateSync)
+        {
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                return CreateDefaultSnapshot();
+            }
+
+            sessionId = _sessionId;
+            state = _stateMachine.Current;
+        }
+
+        return new PlaybackSnapshot(
+            sessionId,
+            state,
+            GetMediaPath(),
+            GetPosition(),
+            GetDuration(),
+            _mediaPlayer.Volume,
+            _mediaPlayer.Mute,
+            _mediaPlayer.Rate,
+            _mediaPlayer.IsSeekable,
+            _mediaPlayer.VideoTrackCount > 0,
+            _mediaPlayer.AudioTrackCount > 0,
+            DateTimeOffset.UtcNow);
+    }
+
+    private static PlaybackSnapshot CreateDefaultSnapshot()
+    {
+        return new PlaybackSnapshot(
+            0,
+            PlaybackState.None,
+            null,
+            TimeSpan.Zero,
+            TimeSpan.Zero,
+            0,
+            false,
+            1.0,
+            false,
+            false,
+            false,
+            DateTimeOffset.UtcNow);
+    }
+
+    private bool HasMediaCore()
+    {
+        using var media = _mediaPlayer.Media;
+        return media is not null;
     }
 
     private string? GetMediaPath()
     {
         using var media = _mediaPlayer.Media;
         return media?.Mrl;
+    }
+
+    private long NextSessionId()
+    {
+        lock (_stateSync)
+        {
+            return ++_sessionId;
+        }
+    }
+
+    private long GetCurrentSessionId()
+    {
+        lock (_stateSync)
+        {
+            return _sessionId;
+        }
+    }
+
+    private bool IsCurrentSession(long sessionId)
+    {
+        if (!IsInitialized)
+        {
+            return false;
+        }
+
+        lock (_stateSync)
+        {
+            return Volatile.Read(ref _disposed) == 0 && _sessionId == sessionId;
+        }
     }
 
     private TimeSpan GetPosition()
