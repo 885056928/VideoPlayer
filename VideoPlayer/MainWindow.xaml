@@ -8,5 +8,12 @@
         MinWidth="800"
         MinHeight="500"
         Background="#111111">
-    <views:PlayerView x:Name="PlayerView" DataContext="{Binding Player}" />
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="300" />
+        </Grid.ColumnDefinitions>
+        <views:PlayerView x:Name="PlayerView" DataContext="{Binding Player}" />
+        <views:PlaylistView Grid.Column="1" DataContext="{Binding Playlist}" />
+    </Grid>
 </Window>
