@@ -26,10 +26,19 @@ public sealed class FileServiceTests
         Directory.CreateDirectory(root);
         try
         {
-            File.WriteAllText(Path.Combine(root, "Movie10.mp4"), string.Empty);
-            File.WriteAllText(Path.Combine(root, "Movie2.mp4"), string.Empty);
-            File.WriteAllText(Path.Combine(root, "notes.txt"), string.Empty);
-            var service = new FileService();
+            var movie10 = Path.Combine(root, "Movie10.mp4");
+            var movie2 = Path.Combine(root, "Movie2.mp4");
+            var notes = Path.Combine(root, "notes.txt");
+            File.WriteAllText(movie10, string.Empty);
+            File.WriteAllText(movie2, string.Empty);
+            File.WriteAllText(notes, string.Empty);
+            var service = new FileService((_, _) => new[]
+            {
+                movie10,
+                movie2,
+                Path.Combine(root, "mOVIE10.MP4"),
+                notes
+            });
 
             var result = await service.EnumerateVideosAsync(root, false, CancellationToken.None);
 
@@ -37,6 +46,35 @@ public sealed class FileServiceTests
             Assert.Equal(2, result.Value!.Count);
             Assert.EndsWith("Movie2.mp4", result.Value[0]);
             Assert.EndsWith("Movie10.mp4", result.Value[1]);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task EnumerateVideosAsync_ReturnsCancelledWhenTokenCanceledDuringEnumeration()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var first = Path.Combine(root, "Movie1.mp4");
+            var second = Path.Combine(root, "Movie2.mp4");
+            using var cancellation = new CancellationTokenSource();
+            var service = new FileService((_, _) => EnumerateAndCancel(
+                first,
+                second,
+                cancellation));
+
+            var result = await service.EnumerateVideosAsync(
+                root,
+                false,
+                cancellation.Token);
+
+            Assert.False(result.IsSuccess);
+            Assert.Equal(ErrorCode.Cancelled, result.ErrorCode);
         }
         finally
         {
@@ -56,5 +94,15 @@ public sealed class FileServiceTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ErrorCode.FileNotFound, result.ErrorCode);
+    }
+
+    private static IEnumerable<string> EnumerateAndCancel(
+        string first,
+        string second,
+        CancellationTokenSource cancellation)
+    {
+        yield return first;
+        cancellation.Cancel();
+        yield return second;
     }
 }

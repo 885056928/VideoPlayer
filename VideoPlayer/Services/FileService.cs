@@ -15,6 +15,19 @@ public sealed class FileService : IFileService
             ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".ts", ".m2ts", ".webm"
         };
 
+    private readonly Func<string, SearchOption, IEnumerable<string>> _enumerateFiles;
+
+    public FileService()
+        : this((folderPath, option) => Directory.EnumerateFiles(folderPath, "*", option))
+    {
+    }
+
+    internal FileService(Func<string, SearchOption, IEnumerable<string>> enumerateFiles)
+    {
+        ArgumentNullException.ThrowIfNull(enumerateFiles);
+        _enumerateFiles = enumerateFiles;
+    }
+
     public bool IsSupportedVideo(string filePath)
     {
         return SupportedExtensions.Contains(Path.GetExtension(filePath));
@@ -34,6 +47,8 @@ public sealed class FileService : IFileService
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 if (!Directory.Exists(folderPath))
                 {
                     return ServiceResult<IReadOnlyList<string>>.Failure(
@@ -46,15 +61,33 @@ public sealed class FileService : IFileService
                     ? SearchOption.AllDirectories
                     : SearchOption.TopDirectoryOnly;
 
-                IReadOnlyList<string> paths = Directory
-                    .EnumerateFiles(folderPath, "*", option)
-                    .Where(IsSupportedVideo)
-                    .Select(PathHelper.NormalizePath)
+                var paths = new List<string>();
+                foreach (var path in _enumerateFiles(folderPath, option))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    if (IsSupportedVideo(path))
+                    {
+                        paths.Add(PathHelper.NormalizePath(path));
+                    }
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                IReadOnlyList<string> sortedPaths = paths
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(path => path, Comparer<string>.Create(PathHelper.NaturalCompare))
                     .ToArray();
 
-                return ServiceResult<IReadOnlyList<string>>.Success(paths);
+                return ServiceResult<IReadOnlyList<string>>.Success(sortedPaths);
+            }
+            catch (OperationCanceledException exception)
+            {
+                return ServiceResult<IReadOnlyList<string>>.Failure(
+                    ErrorCode.Cancelled,
+                    "操作已取消。",
+                    folderPath,
+                    exception);
             }
             catch (UnauthorizedAccessException exception)
             {
@@ -72,6 +105,6 @@ public sealed class FileService : IFileService
                     folderPath,
                     exception);
             }
-        }, cancellationToken);
+        }, CancellationToken.None);
     }
 }
