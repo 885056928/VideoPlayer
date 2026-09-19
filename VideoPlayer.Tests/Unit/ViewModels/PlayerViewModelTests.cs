@@ -159,6 +159,28 @@ public sealed class PlayerViewModelTests
     }
 
     [Fact]
+    public async Task ProgressRefresh_WithoutDragging_UpdatesPendingSeekPosition()
+    {
+        var fake = new FakePlayerService
+        {
+            CurrentSnapshot = CreateSnapshot(
+                TimeSpan.FromSeconds(1),
+                TimeSpan.FromMinutes(1))
+        };
+        await using var viewModel = CreateViewModel(fake);
+
+        await viewModel.StartProgressRefreshAsync();
+        await WaitUntilAsync(() => viewModel.PendingSeekPosition == 1);
+        fake.CurrentSnapshot = CreateSnapshot(
+            TimeSpan.FromSeconds(4),
+            TimeSpan.FromMinutes(1));
+
+        await WaitUntilAsync(() => viewModel.PendingSeekPosition == 4);
+
+        Assert.Equal(4, viewModel.PendingSeekPosition);
+    }
+
+    [Fact]
     public async Task ProgressRefresh_DoesNotChangePendingSeekWhileSeeking()
     {
         var fake = new FakePlayerService

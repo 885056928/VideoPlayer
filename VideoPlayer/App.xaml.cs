@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using VideoPlayer.Configuration;
 using VideoPlayer.Interfaces;
+using VideoPlayer.Services;
 using VideoPlayer.ViewModels;
 
 namespace VideoPlayer;
@@ -13,7 +14,9 @@ namespace VideoPlayer;
 public partial class App : Application
 {
     private static readonly TimeSpan ServiceDisposalTimeout = TimeSpan.FromSeconds(5);
+    private readonly object _shutdownSync = new();
     private ServiceProvider? _services;
+    private Task? _shutdownTask;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -53,13 +56,21 @@ public partial class App : Application
         }
     }
 
-    protected override void OnExit(ExitEventArgs e)
+    protected override async void OnExit(ExitEventArgs e)
     {
-        DisposeServicesSafely();
         base.OnExit(e);
+        await DisposeServicesAsync();
     }
 
-    private void DisposeServicesSafely()
+    internal Task DisposeServicesAsync()
+    {
+        lock (_shutdownSync)
+        {
+            return _shutdownTask ??= DisposeServicesCoreAsync();
+        }
+    }
+
+    private async Task DisposeServicesCoreAsync()
     {
         var services = Interlocked.Exchange(ref _services, null);
         if (services is null)
@@ -68,31 +79,20 @@ public partial class App : Application
             return;
         }
 
-        var closeLogger = true;
-        try
+        var disposed = await ServiceProviderShutdown.DisposeAsync(
+            services,
+            ServiceDisposalTimeout,
+            exception => Log.Error(exception, "Service provider disposal failed."))
+            .ConfigureAwait(false);
+        if (!disposed)
         {
-            var disposeTask = Task.Run(
-                async () => await services.DisposeAsync().ConfigureAwait(false));
+            Log.Warning(
+                "Service provider disposal timed out after {Timeout}.",
+                ServiceDisposalTimeout);
+            return;
+        }
 
-            if (!disposeTask.Wait(ServiceDisposalTimeout))
-            {
-                closeLogger = false;
-                Log.Warning(
-                    "Service provider disposal timed out after {Timeout}.",
-                    ServiceDisposalTimeout);
-            }
-        }
-        catch (Exception exception)
-        {
-            Log.Error(exception, "Service provider disposal failed.");
-        }
-        finally
-        {
-            if (closeLogger)
-            {
-                CloseLoggerSafely();
-            }
-        }
+        CloseLoggerSafely();
     }
 
     private static void CloseLoggerSafely()

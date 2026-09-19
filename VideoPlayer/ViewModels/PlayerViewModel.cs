@@ -238,6 +238,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             {
                 Position = snapshot.Position;
                 Duration = snapshot.Duration;
+                PendingSeekPosition = snapshot.Position.TotalSeconds;
             }
 
             Volume = snapshot.Volume;
