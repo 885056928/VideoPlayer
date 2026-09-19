@@ -1,6 +1,5 @@
-using System.IO;
-
 using System.Collections.ObjectModel;
+using System.IO;
 
 using VideoPlayer.Enums;
 using VideoPlayer.Helpers;
@@ -42,72 +41,10 @@ public sealed class PlaylistService : IPlaylistService
     {
         ArgumentNullException.ThrowIfNull(paths);
 
-        var added = new List<PlaylistItem>();
-        var addedKeys = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var rawPath in paths)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (Directory.Exists(rawPath))
-            {
-                var folderResult = await _fileService.EnumerateVideosAsync(
-                    rawPath,
-                    recursive,
-                    cancellationToken).ConfigureAwait(false);
-
-                if (!folderResult.IsSuccess)
-                {
-                    if (folderResult.ErrorCode == ErrorCode.Cancelled)
-                    {
-                        return ServiceResult<IReadOnlyList<PlaylistItem>>.Failure(
-                            folderResult.ErrorCode,
-                            folderResult.UserMessage,
-                            folderResult.TechnicalMessage,
-                            folderResult.Exception);
-                    }
-
-                    continue;
-                }
-
-                if (folderResult.Value is not null)
-                {
-                    AddPaths(folderResult.Value, added, addedKeys);
-                }
-            }
-            else if (File.Exists(rawPath) && _fileService.IsSupportedVideo(rawPath))
-            {
-                AddPaths([rawPath], added, addedKeys);
-            }
-        }
-
-        if (added.Count == 0)
-        {
-            return ServiceResult<IReadOnlyList<PlaylistItem>>.Failure(
-                ErrorCode.FileNotFound,
-                "没有找到可加入的视频。",
-                "No supported files.");
-        }
-
-        _items.AddRange(added);
-        foreach (var key in addedKeys)
-        {
-            _pathKeys.Add(key);
-        }
-
-        var currentChanged = CurrentIndex < 0;
-        if (currentChanged)
-        {
-            CurrentIndex = 0;
-        }
-
-        PlaylistChanged?.Invoke(this, EventArgs.Empty);
-        if (currentChanged)
-        {
-            CurrentChanged?.Invoke(this, EventArgs.Empty);
-        }
-
-        return ServiceResult<IReadOnlyList<PlaylistItem>>.Success(added.AsReadOnly());
+        var eventContext = SynchronizationContext.Current;
+        return await Task.Run(
+            () => AddFilesCoreAsync(paths, recursive, cancellationToken, eventContext),
+            CancellationToken.None).ConfigureAwait(false);
     }
 
     public Task<ServiceResult> AddFolderAsync(
@@ -122,6 +59,12 @@ public sealed class PlaylistService : IPlaylistService
         string filePath,
         CancellationToken cancellationToken = default)
     {
+        var eventContext = SynchronizationContext.Current;
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromResult(CreateCancelledResult("Remove cancelled."));
+        }
+
         var key = PathHelper.CreatePathKey(filePath);
         var index = _items.FindIndex(item => PathHelper.CreatePathKey(item.FilePath) == key);
         if (index < 0)
@@ -153,17 +96,18 @@ public sealed class PlaylistService : IPlaylistService
         var currentChanged = previousIndex != CurrentIndex ||
             !ReferenceEquals(previousCurrent, Current);
 
-        PlaylistChanged?.Invoke(this, EventArgs.Empty);
-        if (currentChanged)
-        {
-            CurrentChanged?.Invoke(this, EventArgs.Empty);
-        }
-
+        PublishChanges(eventContext, currentChanged);
         return Task.FromResult(ServiceResult.Success());
     }
 
     public Task<ServiceResult> ClearAsync(CancellationToken cancellationToken = default)
     {
+        var eventContext = SynchronizationContext.Current;
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromResult(CreateCancelledResult("Clear cancelled."));
+        }
+
         var hadItems = _items.Count > 0;
         _items.Clear();
         _pathKeys.Clear();
@@ -171,8 +115,7 @@ public sealed class PlaylistService : IPlaylistService
 
         if (hadItems)
         {
-            PlaylistChanged?.Invoke(this, EventArgs.Empty);
-            CurrentChanged?.Invoke(this, EventArgs.Empty);
+            PublishChanges(eventContext, currentChanged: true);
         }
 
         return Task.FromResult(ServiceResult.Success());
@@ -249,6 +192,8 @@ public sealed class PlaylistService : IPlaylistService
 
     public ServiceResult SetCurrent(string filePath)
     {
+        var eventContext = SynchronizationContext.Current;
+
         string key;
         try
         {
@@ -274,7 +219,7 @@ public sealed class PlaylistService : IPlaylistService
         if (CurrentIndex != index)
         {
             CurrentIndex = index;
-            CurrentChanged?.Invoke(this, EventArgs.Empty);
+            PublishChanges(eventContext, currentChanged: true);
         }
 
         return ServiceResult.Success();
@@ -316,6 +261,97 @@ public sealed class PlaylistService : IPlaylistService
                 result.Exception);
     }
 
+    private async Task<ServiceResult<IReadOnlyList<PlaylistItem>>> AddFilesCoreAsync(
+        IEnumerable<string> paths,
+        bool recursive,
+        CancellationToken cancellationToken,
+        SynchronizationContext? eventContext)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var added = new List<PlaylistItem>();
+            var addedKeys = new HashSet<string>(StringComparer.Ordinal);
+            ServiceResult<IReadOnlyList<string>>? folderFailure = null;
+
+            foreach (var rawPath in paths)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (Directory.Exists(rawPath))
+                {
+                    var folderResult = await _fileService.EnumerateVideosAsync(
+                        rawPath,
+                        recursive,
+                        cancellationToken).ConfigureAwait(false);
+
+                    if (!folderResult.IsSuccess)
+                    {
+                        if (folderResult.ErrorCode == ErrorCode.Cancelled)
+                        {
+                            return CreateCancelledResult<IReadOnlyList<PlaylistItem>>(
+                                folderResult.TechnicalMessage,
+                                folderResult.Exception);
+                        }
+
+                        folderFailure ??= folderResult;
+                        continue;
+                    }
+
+                    if (folderResult.Value is not null)
+                    {
+                        AddPaths(folderResult.Value, added, addedKeys);
+                    }
+                }
+                else if (File.Exists(rawPath) && _fileService.IsSupportedVideo(rawPath))
+                {
+                    AddPaths([rawPath], added, addedKeys);
+                }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (added.Count == 0)
+            {
+                if (folderFailure is not null)
+                {
+                    return ServiceResult<IReadOnlyList<PlaylistItem>>.Failure(
+                        folderFailure.ErrorCode,
+                        folderFailure.UserMessage,
+                        folderFailure.TechnicalMessage,
+                        folderFailure.Exception);
+                }
+
+                return ServiceResult<IReadOnlyList<PlaylistItem>>.Failure(
+                    ErrorCode.FileNotFound,
+                    "没有找到可加入的视频。",
+                    "No supported files.");
+            }
+
+            _items.AddRange(added);
+            foreach (var key in addedKeys)
+            {
+                _pathKeys.Add(key);
+            }
+
+            var currentChanged = CurrentIndex < 0;
+            if (currentChanged)
+            {
+                CurrentIndex = 0;
+            }
+
+            PublishChanges(eventContext, currentChanged);
+            return ServiceResult<IReadOnlyList<PlaylistItem>>.Success(added.AsReadOnly());
+        }
+        catch (OperationCanceledException exception)
+        {
+            return CreateCancelledResult<IReadOnlyList<PlaylistItem>>(
+                "Add files cancelled.",
+                exception);
+        }
+    }
+
     private void AddPaths(
         IEnumerable<string> paths,
         List<PlaylistItem> added,
@@ -339,10 +375,55 @@ public sealed class PlaylistService : IPlaylistService
     {
         if (CurrentIndex != index)
         {
+            var eventContext = SynchronizationContext.Current;
             CurrentIndex = index;
-            CurrentChanged?.Invoke(this, EventArgs.Empty);
+            PublishChanges(eventContext, currentChanged: true);
         }
 
         return ServiceResult<PlaylistItem>.Success(_items[index]);
+    }
+
+    private void PublishChanges(SynchronizationContext? eventContext, bool currentChanged)
+    {
+        if (eventContext is null)
+        {
+            RaiseChanges(currentChanged);
+            return;
+        }
+
+        eventContext.Post(
+            _ => RaiseChanges(currentChanged),
+            null);
+    }
+
+    private void RaiseChanges(bool currentChanged)
+    {
+        PlaylistChanged?.Invoke(this, EventArgs.Empty);
+        if (currentChanged)
+        {
+            CurrentChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private static ServiceResult CreateCancelledResult(
+        string technicalMessage,
+        Exception? exception = null)
+    {
+        return ServiceResult.Failure(
+            ErrorCode.Cancelled,
+            "操作已取消。",
+            technicalMessage,
+            exception);
+    }
+
+    private static ServiceResult<T> CreateCancelledResult<T>(
+        string technicalMessage,
+        Exception? exception = null)
+    {
+        return ServiceResult<T>.Failure(
+            ErrorCode.Cancelled,
+            "操作已取消。",
+            technicalMessage,
+            exception);
     }
 }
