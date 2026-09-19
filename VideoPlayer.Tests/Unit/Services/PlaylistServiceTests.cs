@@ -504,6 +504,68 @@ public sealed class PlaylistServiceTests
             Directory.Delete(root, true);
         }
     }
+    [Fact]
+    public async Task SetCurrent_RaisesOnlyCurrentChangedOnCapturedContext()
+    {
+        var service = new PlaylistService(new FileService());
+        service.SetCurrentForTest(["a.mp4", "b.mp4"], 0);
+
+        await AssertSelectionOnlyChangeAsync(service, () => service.SetCurrent("b.mp4"));
+    }
+
+    [Fact]
+    public async Task GetNext_RaisesOnlyCurrentChangedOnCapturedContext()
+    {
+        var service = new PlaylistService(new FileService());
+        service.SetCurrentForTest(["a.mp4", "b.mp4"], 0);
+
+        await AssertSelectionOnlyChangeAsync(service, () => service.GetNext());
+    }
+
+    [Fact]
+    public async Task GetPrevious_RaisesOnlyCurrentChangedOnCapturedContext()
+    {
+        var service = new PlaylistService(new FileService());
+        service.SetCurrentForTest(["a.mp4", "b.mp4"], 1);
+
+        await AssertSelectionOnlyChangeAsync(service, () => service.GetPrevious());
+    }
+
+    private static async Task AssertSelectionOnlyChangeAsync(
+        PlaylistService service,
+        Action selectionChange)
+    {
+        var playlistChangedCount = 0;
+        var currentChangedCount = 0;
+        int? playlistThreadId = null;
+        int? currentThreadId = null;
+        var currentChanged = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        service.PlaylistChanged += (_, _) =>
+        {
+            playlistChangedCount++;
+            playlistThreadId = Environment.CurrentManagedThreadId;
+        };
+        service.CurrentChanged += (_, _) =>
+        {
+            currentChangedCount++;
+            currentThreadId = Environment.CurrentManagedThreadId;
+            currentChanged.TrySetResult(null);
+        };
+
+        using var context = new SingleThreadSynchronizationContext();
+        await context.RunAsync(async () =>
+        {
+            selectionChange();
+            await currentChanged.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        });
+
+        Assert.Equal(0, playlistChangedCount);
+        Assert.Equal(1, currentChangedCount);
+        Assert.Null(playlistThreadId);
+        Assert.Equal(context.ThreadId, currentThreadId);
+    }
     private sealed class FailingEnumerationFileService : IFileService
     {
         private readonly ErrorCode _errorCode;

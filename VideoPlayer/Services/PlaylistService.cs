@@ -219,7 +219,7 @@ public sealed class PlaylistService : IPlaylistService
         if (CurrentIndex != index)
         {
             CurrentIndex = index;
-            PublishChanges(eventContext, currentChanged: true);
+            PublishCurrentChange(eventContext);
         }
 
         return ServiceResult.Success();
@@ -377,12 +377,24 @@ public sealed class PlaylistService : IPlaylistService
         {
             var eventContext = SynchronizationContext.Current;
             CurrentIndex = index;
-            PublishChanges(eventContext, currentChanged: true);
+            PublishCurrentChange(eventContext);
         }
 
         return ServiceResult<PlaylistItem>.Success(_items[index]);
     }
 
+    private void PublishCurrentChange(SynchronizationContext? eventContext)
+    {
+        if (eventContext is null)
+        {
+            CurrentChanged?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        eventContext.Post(
+            _ => CurrentChanged?.Invoke(this, EventArgs.Empty),
+            null);
+    }
     private void PublishChanges(SynchronizationContext? eventContext, bool currentChanged)
     {
         if (eventContext is null)
