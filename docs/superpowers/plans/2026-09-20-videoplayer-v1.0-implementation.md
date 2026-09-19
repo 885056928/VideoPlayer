@@ -148,6 +148,7 @@ Configure `VideoPlayer.Tests/VideoPlayer.Tests.csproj`:
     <PlatformTarget>x64</PlatformTarget>
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
+    <WarningsAsErrors>nullable</WarningsAsErrors>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
