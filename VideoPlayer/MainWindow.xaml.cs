@@ -216,6 +216,8 @@ public partial class MainWindow : Window
 
     private void OnFullscreenChanged(bool isFullscreen)
     {
+        PlayerView.SetFullscreenMode(isFullscreen);
+
         if (isFullscreen)
         {
             _playlistVisibleBeforeFullscreen = _isPlaylistVisible;

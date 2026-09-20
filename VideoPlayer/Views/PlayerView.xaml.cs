@@ -11,6 +11,7 @@ public partial class PlayerView : UserControl, IDisposable
 {
     private static readonly TimeSpan ControlBarIdleTimeout = TimeSpan.FromSeconds(2);
     private readonly DispatcherTimer _controlBarTimer;
+    private bool _isFullscreen;
 
     public PlayerView()
     {
@@ -49,17 +50,34 @@ public partial class PlayerView : UserControl, IDisposable
     private void ControlBarTimer_Tick(object? sender, EventArgs e)
     {
         _controlBarTimer.Stop();
-        ControlBar.Visibility = Visibility.Collapsed;
+        if (ControlBarVisibilityPolicy.ShouldCollapseOnIdle(_isFullscreen))
+        {
+            ControlBar.Visibility = Visibility.Collapsed;
+        }
     }
 
     private void ShowControlBar()
     {
         ControlBar.Visibility = Visibility.Visible;
         _controlBarTimer.Stop();
-        if (IsLoaded)
+        if (ControlBarVisibilityPolicy.ShouldStartAutoHideTimer(IsLoaded, _isFullscreen))
         {
             _controlBarTimer.Start();
         }
+    }
+
+    public void SetFullscreenMode(bool isFullscreen)
+    {
+        _isFullscreen = isFullscreen;
+        _controlBarTimer.Stop();
+
+        if (isFullscreen)
+        {
+            ShowControlBar();
+            return;
+        }
+
+        ControlBar.Visibility = Visibility.Visible;
     }
 
     private async void Open_Click(object sender, RoutedEventArgs e)
