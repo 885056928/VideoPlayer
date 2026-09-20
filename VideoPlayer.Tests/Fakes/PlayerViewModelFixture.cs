@@ -52,6 +52,7 @@ public sealed class FakePlayerService : IPlayerService
     public int OpenCount { get; private set; }
     public int PlayCallCount { get; private set; }
     public int PauseCallCount { get; private set; }
+    public Func<string, TimeSpan, string, CancellationToken, Task<ServiceResult<string>>>? PreviewHandler { get; set; }
     public ServiceResult<IReadOnlyList<PlayerTrackInfo>> TracksResult { get; set; } =
         ServiceResult<IReadOnlyList<PlayerTrackInfo>>.Success([]);
     public ServiceResult SelectAudioTrackResult { get; set; } = ServiceResult.Success();
@@ -163,6 +164,17 @@ public sealed class FakePlayerService : IPlayerService
     }
     public Task<ServiceResult> StopAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(ServiceResult.Success());
+    public Task<ServiceResult<string>> CapturePreviewFrameAsync(
+        string mediaPath,
+        TimeSpan position,
+        string outputPath,
+        CancellationToken cancellationToken = default)
+        => PreviewHandler is not null
+            ? PreviewHandler(mediaPath, position, outputPath, cancellationToken)
+            : Task.FromResult(ServiceResult<string>.Failure(
+                ErrorCode.InvalidState,
+                string.Empty,
+                "Preview unavailable."));
     public Task<ServiceResult> SeekAsync(TimeSpan position, CancellationToken cancellationToken = default)
         => Task.FromResult(ServiceResult.Success());
     public Task<ServiceResult> SetVolumeAsync(int volume, CancellationToken cancellationToken = default)

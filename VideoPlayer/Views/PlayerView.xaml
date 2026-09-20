@@ -1,8 +1,71 @@
 <UserControl x:Class="VideoPlayer.Views.PlayerView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF">
+             xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
+             xmlns:converters="clr-namespace:VideoPlayer.Converters">
     <UserControl.Resources>
+        <converters:TimeSpanToTextConverter x:Key="TimeSpanToTextConverter" />
+
+        <Style x:Key="ProgressTrackButtonStyle" TargetType="{x:Type RepeatButton}">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type RepeatButton}">
+                        <Border Height="4"
+                                CornerRadius="2"
+                                Background="{TemplateBinding Background}" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ProgressThumbStyle" TargetType="{x:Type Thumb}">
+            <Setter Property="Width" Value="14" />
+            <Setter Property="Height" Value="14" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Thumb}">
+                        <Ellipse Fill="{DynamicResource PrimaryTextBrush}"
+                                 Stroke="{DynamicResource AccentBrush}"
+                                 StrokeThickness="2" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="MediaProgressSliderStyle" TargetType="{x:Type Slider}">
+            <Setter Property="Height" Value="20" />
+            <Setter Property="Background" Value="{DynamicResource ControlBorderBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Slider}">
+                        <Grid>
+                            <Border Height="4"
+                                    CornerRadius="2"
+                                    Background="{TemplateBinding Background}"
+                                    VerticalAlignment="Center" />
+                            <Track x:Name="PART_Track">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Style="{StaticResource ProgressTrackButtonStyle}"
+                                                  Background="{DynamicResource AccentBrush}"
+                                                  Command="{x:Static Slider.DecreaseLarge}" />
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource ProgressThumbStyle}" />
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Style="{StaticResource ProgressTrackButtonStyle}"
+                                                  Background="{DynamicResource ControlBorderBrush}"
+                                                  Command="{x:Static Slider.IncreaseLarge}" />
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="IconButtonStyle" TargetType="{x:Type Button}">
             <Setter Property="Width" Value="34" />
             <Setter Property="Height" Value="34" />
@@ -252,6 +315,7 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Slider x:Name="SeekSlider"
+                            Style="{StaticResource MediaProgressSliderStyle}"
                             Minimum="0"
                             IsMoveToPointEnabled="True"
                             Maximum="{Binding Duration.TotalSeconds, Mode=OneWay}"
@@ -260,12 +324,14 @@
                             PreviewMouseLeftButtonUp="SeekSlider_PreviewMouseLeftButtonUp"
                             LostMouseCapture="SeekSlider_LostMouseCapture"
                             PreviewKeyDown="SeekSlider_PreviewKeyDown"
-                            PreviewKeyUp="SeekSlider_PreviewKeyUp" />
+                            PreviewKeyUp="SeekSlider_PreviewKeyUp"
+                            MouseMove="SeekSlider_MouseMove"
+                            MouseLeave="SeekSlider_MouseLeave" />
                     <TextBlock Grid.Column="1"
                                Margin="12,0,4,0"
                                Foreground="{DynamicResource PrimaryTextBrush}"
                                VerticalAlignment="Center">
-                        <Run Text="{Binding Position}" /><Run Text=" / " /><Run Text="{Binding Duration}" />
+                        <Run Text="{Binding Position, Converter={StaticResource TimeSpanToTextConverter}}" /><Run Text=" / " /><Run Text="{Binding Duration, Converter={StaticResource TimeSpanToTextConverter}}" />
                     </TextBlock>
                 </Grid>
 
@@ -384,5 +450,42 @@
                 </Grid>
             </Grid>
         </Border>
-    </Grid>
+        <Popup x:Name="SeekPreviewPopup"
+               Placement="Mouse"
+               PlacementTarget="{Binding ElementName=SeekSlider}"
+               AllowsTransparency="True"
+               StaysOpen="True"
+               IsHitTestVisible="False"
+               HorizontalOffset="-100"
+               VerticalOffset="-132">
+            <Border Background="#E61B1B1B"
+                    BorderBrush="{DynamicResource ControlBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="6">
+                <StackPanel>
+                    <Border Width="180"
+                            Height="101"
+                            Background="#050505"
+                            CornerRadius="4"
+                            BorderBrush="{DynamicResource ControlBorderBrush}"
+                            BorderThickness="1">
+                        <Grid>
+                            <TextBlock Text="&#xE714;"
+                                       FontFamily="Segoe MDL2 Assets"
+                                       FontSize="28"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                            <Image Source="{Binding HoverPreviewPath}"
+                                   Stretch="UniformToFill" />
+                        </Grid>
+                    </Border>
+                    <TextBlock Text="{Binding HoverTimeText}"
+                               Foreground="{DynamicResource PrimaryTextBrush}"
+                               HorizontalAlignment="Center"
+                               Margin="0,6,0,0" />
+                </StackPanel>
+            </Border>
+        </Popup>    </Grid>
 </UserControl>

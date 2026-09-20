@@ -25,3 +25,9 @@ Windows desktop media tool. Dense, dark, playback-first.
 - Icon buttons use a 34x34 hit target with a visible keyboard focus ring.
 - Tooltips are the only visible labels; do not add redundant text inside icon buttons.
 - Keep icon and text controls aligned on one stable control-bar row.
+## Progress visualization
+- Current time and duration use `HH:MM:SS`; fractional seconds are never displayed.
+- The played portion uses the accent color; the remaining portion uses the border/control color.
+- The progress thumb is a circular ball with a visible accent outline.
+- Hovering the progress bar opens a non-interactive preview containing the hover time and a single-frame image.
+- Frame previews are debounced and isolated from main playback; preview failure falls back to time-only display.

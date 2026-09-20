@@ -16,6 +16,8 @@ public partial class PlayerView : UserControl, IDisposable
     public PlayerView()
     {
         InitializeComponent();
+        DataContextChanged += (_, args) => SeekPreviewPopup.DataContext = args.NewValue;
+        SeekPreviewPopup.DataContext = DataContext;
         _controlBarTimer = new DispatcherTimer
         {
             Interval = ControlBarIdleTimeout
@@ -151,6 +153,32 @@ public partial class PlayerView : UserControl, IDisposable
         }
     }
 
+    private void SeekSlider_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (DataContext is not PlayerViewModel viewModel
+            || viewModel.Duration <= TimeSpan.Zero
+            || SeekSlider.ActualWidth <= 0)
+        {
+            return;
+        }
+
+        var ratio = Math.Clamp(
+            e.GetPosition(SeekSlider).X / SeekSlider.ActualWidth,
+            0,
+            1);
+        var position = TimeSpan.FromTicks((long)(viewModel.Duration.Ticks * ratio));
+        SeekPreviewPopup.IsOpen = true;
+        _ = viewModel.RequestFramePreviewAsync(position);
+    }
+
+    private void SeekSlider_MouseLeave(object sender, MouseEventArgs e)
+    {
+        SeekPreviewPopup.IsOpen = false;
+        if (DataContext is PlayerViewModel viewModel)
+        {
+            viewModel.CancelFramePreview();
+        }
+    }
     private async Task CommitSeekAsync()
     {
         if (DataContext is PlayerViewModel viewModel)

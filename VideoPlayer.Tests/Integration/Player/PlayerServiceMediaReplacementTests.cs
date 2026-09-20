@@ -1,4 +1,5 @@
 using System.IO;
+using System.Windows.Threading;
 using LibVLCSharp.Shared;
 using Serilog;
 using VideoPlayer.Enums;
@@ -104,7 +105,7 @@ public sealed class PlayerServiceMediaReplacementTests
 
             var result = await service.AddExternalSubtitleAsync(subtitlePath, select: true);
 
-            Assert.True(result.IsSuccess, result.TechnicalMessage);
+            Assert.True(result.IsSuccess, result.TechnicalMessage + " " + result.Exception);
             Assert.NotEmpty(trackEvents);
             Assert.All(
                 trackEvents,
@@ -144,6 +145,31 @@ public sealed class PlayerServiceMediaReplacementTests
         }
     }
 
+    [StaFact]
+    public async Task CapturePreviewFrameAsync_WhenMediaSeekable_ReturnsNonEmptyPng()
+    {
+        var mediaPath = CreateMediaFile(frameCount: 300);
+        var previewPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".png");
+        using var uiDispatcher = new StaUiDispatcher();
+        await using var service = CreateService(uiDispatcher, ["--no-audio"]);
+
+        try
+        {
+            var result = await service.CapturePreviewFrameAsync(
+                mediaPath,
+                TimeSpan.FromMilliseconds(200),
+                previewPath);
+
+            Assert.True(result.IsSuccess, result.TechnicalMessage + " " + result.Exception);
+            Assert.True(File.Exists(previewPath));
+            Assert.True(new FileInfo(previewPath).Length > 0);
+        }
+        finally
+        {
+            File.Delete(mediaPath);
+            File.Delete(previewPath);
+        }
+    }
     private static async Task WaitForPositionAsync(
         PlayerService service,
         TimeSpan minimumPosition)
@@ -161,11 +187,17 @@ public sealed class PlayerServiceMediaReplacementTests
 
         throw new Xunit.Sdk.XunitException("Timed out waiting for the resume position.");
     }
-    private static PlayerService CreateService()
+    private static PlayerService CreateService(
+        IUiDispatcher dispatcher,
+        string[]? options = null)
         => new(
-            new ImmediateUiDispatcher(),
+            dispatcher,
             new LoggerConfiguration().CreateLogger(),
-            ["--vout=dummy", "--aout=dummy", "--no-audio"]);
+            options ?? ["--vout=dummy", "--aout=dummy", "--no-audio"]);
+
+    private static PlayerService CreateService(string[]? options = null)
+        => CreateService(new ImmediateUiDispatcher(), options);
+
 
     private static OpenMediaRequest CreateRequest(string path, TimeSpan? startPosition = null)
         => new(path, startPosition ?? TimeSpan.Zero, AutoPlay: true, null, null);
@@ -215,6 +247,46 @@ public sealed class PlayerServiceMediaReplacementTests
         return path;
     }
 
+    private sealed class StaUiDispatcher : IUiDispatcher, IDisposable
+    {
+        private readonly Thread _thread;
+        private readonly ManualResetEventSlim _ready = new(false);
+        private readonly Dispatcher _dispatcher;
+
+        public StaUiDispatcher()
+        {
+            Dispatcher? dispatcher = null;
+            _thread = new Thread(() =>
+            {
+                dispatcher = Dispatcher.CurrentDispatcher;
+                _ready.Set();
+                Dispatcher.Run();
+            })
+            {
+                IsBackground = true,
+                Name = "VideoPlayer STA test dispatcher"
+            };
+            _thread.SetApartmentState(ApartmentState.STA);
+            _thread.Start();
+            _ready.Wait();
+            _dispatcher = dispatcher!;
+        }
+
+        public bool CheckAccess() => _dispatcher.CheckAccess();
+
+        public void Post(Action action) => _dispatcher.BeginInvoke(action);
+
+        public Task InvokeAsync(Action action) => _dispatcher.InvokeAsync(action).Task;
+
+        public Task<T> InvokeAsync<T>(Func<T> action) => _dispatcher.InvokeAsync(action).Task;
+
+        public void Dispose()
+        {
+            _dispatcher.InvokeShutdown();
+            _thread.Join(TimeSpan.FromSeconds(2));
+            _ready.Dispose();
+        }
+    }
     private sealed class ImmediateUiDispatcher : IUiDispatcher
     {
         public bool CheckAccess() => true;

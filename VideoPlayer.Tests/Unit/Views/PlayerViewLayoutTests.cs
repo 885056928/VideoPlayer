@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using VideoPlayer.Views;
 using Xunit;
 
@@ -28,12 +29,14 @@ public sealed class PlayerViewLayoutTests
         var view = new PlayerView();
 
         Assert.NotNull(view.FindName("PrimaryOpenButton"));
-        Assert.NotNull(view.FindName("PlaybackGroup"));
         Assert.IsType<Grid>(view.FindName("SeekGroup"));
         var playbackGroup = Assert.IsType<StackPanel>(view.FindName("PlaybackGroup"));
         var trackTools = Assert.IsType<StackPanel>(view.FindName("TrackToolsGroup"));
         var volumeSlider = Assert.IsType<Slider>(view.FindName("VolumeSlider"));
+        var seekSlider = Assert.IsType<Slider>(view.FindName("SeekSlider"));
 
+        Assert.NotNull(seekSlider.Style);
+        Assert.IsType<Popup>(view.FindName("SeekPreviewPopup"));
         Assert.Same(playbackGroup, volumeSlider.Parent);
         Assert.DoesNotContain(
             trackTools.Children.OfType<Slider>(),

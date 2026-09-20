@@ -221,6 +221,21 @@ public sealed class PlayerViewModelFinalReviewTests
         Assert.Equal(1, fixture.Player.PlayCallCount);
     }
     [Fact]
+    public async Task RequestFramePreview_UpdatesTimeWithoutFractionsAndPreviewPath()
+    {
+        var fixture = new PlayerViewModelFixture(sessionId: 70);
+        await using var viewModel = fixture.ViewModel;
+        await viewModel.OpenAsync("movie.mp4");
+        viewModel.Duration = TimeSpan.FromMinutes(10);
+        fixture.Player.PreviewHandler = (_, _, output, _) =>
+            Task.FromResult(ServiceResult<string>.Success(output));
+
+        await viewModel.RequestFramePreviewAsync(TimeSpan.FromSeconds(5.789));
+
+        Assert.Equal("00:00:05", viewModel.HoverTimeText);
+        Assert.False(string.IsNullOrWhiteSpace(viewModel.HoverPreviewPath));
+    }
+    [Fact]
     public async Task OpenAsync_WhenPlayingEventArrivesBeforeOpenCompletes_TransitionsToPlaying()
     {
         var fixture = new PlayerViewModelFixture(sessionId: 68);

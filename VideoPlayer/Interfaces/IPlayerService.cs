@@ -26,6 +26,15 @@ public interface IPlayerService : IAsyncDisposable
     Task<ServiceResult> PlayAsync(CancellationToken cancellationToken = default);
     Task<ServiceResult> PauseAsync(CancellationToken cancellationToken = default);
     Task<ServiceResult> StopAsync(CancellationToken cancellationToken = default);
+    Task<ServiceResult<string>> CapturePreviewFrameAsync(
+        string mediaPath,
+        TimeSpan position,
+        string outputPath,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(ServiceResult<string>.Failure(
+            ErrorCode.InvalidState,
+            string.Empty,
+            "Frame preview is not supported by this player implementation."));
     Task<ServiceResult> SeekAsync(TimeSpan position, CancellationToken cancellationToken = default);
     Task<ServiceResult> SetVolumeAsync(int volume, CancellationToken cancellationToken = default);
     Task<ServiceResult> SetMuteAsync(bool isMuted, CancellationToken cancellationToken = default);

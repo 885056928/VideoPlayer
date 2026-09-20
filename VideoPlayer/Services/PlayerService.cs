@@ -1,4 +1,5 @@
 using System.IO;
+using System.Windows.Interop;
 using LibVLCSharp.Shared;
 using Serilog;
 using VideoPlayer.Enums;
@@ -14,10 +15,14 @@ public sealed class PlayerService : IPlayerService
     private readonly IUiDispatcher _dispatcher;
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _commandGate = new(1, 1);
+    private readonly SemaphoreSlim _previewGate = new(1, 1);
     private readonly PlaybackStateMachine _stateMachine = new();
     private readonly object _stateSync = new();
     private readonly LibVLC _libVlc;
     private readonly MediaPlayer _mediaPlayer;
+    private MediaPlayer? _previewPlayer;
+    private Media? _previewMedia;
+    private System.Windows.Window? _previewWindow;
     private EventHandler<EventArgs>? _openingHandler;
     private EventHandler<EventArgs>? _playingHandler;
     private EventHandler<EventArgs>? _pausedHandler;
@@ -648,6 +653,240 @@ public sealed class PlayerService : IPlayerService
         }
     }
 
+    public Task<ServiceResult<string>> CapturePreviewFrameAsync(
+        string mediaPath,
+        TimeSpan position,
+        string outputPath,
+        CancellationToken cancellationToken = default)
+        => Task.Run(
+            () => CapturePreviewFrameCoreAsync(
+                mediaPath,
+                position,
+                outputPath,
+                cancellationToken),
+            cancellationToken);
+
+    private async Task<ServiceResult<string>> CapturePreviewFrameCoreAsync(
+        string mediaPath,
+        TimeSpan position,
+        string outputPath,
+        CancellationToken cancellationToken)
+    {
+        await _previewGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!IsInitialized || !File.Exists(mediaPath) || string.IsNullOrWhiteSpace(outputPath))
+            {
+                return ServiceResult<string>.Failure(
+                    ErrorCode.InvalidState,
+                    string.Empty,
+                    "Frame preview request is invalid.");
+            }
+
+            await EnsurePreviewPlayerAsync(cancellationToken).ConfigureAwait(false);
+            var previewPlayer = _previewPlayer;
+            if (previewPlayer is null)
+            {
+                return ServiceResult<string>.Failure(
+                    ErrorCode.PlayerNotInitialized,
+                    string.Empty,
+                    "Preview player is unavailable.");
+            }
+
+            var directory = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            _previewMedia?.Dispose();
+            _previewMedia = new Media(_libVlc, new Uri(PathHelper.NormalizePath(mediaPath)));
+            _previewMedia.AddOption(":no-audio");
+            previewPlayer.Media = _previewMedia;
+
+            var playing = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var voutReady = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            EventHandler<EventArgs>? handler = null;
+            EventHandler<MediaPlayerVoutEventArgs>? voutHandler = null;
+            handler = (_, _) => playing.TrySetResult();
+            voutHandler = (_, _) => voutReady.TrySetResult();
+            previewPlayer.Playing += handler;
+            previewPlayer.Vout += voutHandler;
+            try
+            {
+                if (!previewPlayer.Play())
+                {
+                    return ServiceResult<string>.Failure(
+                        ErrorCode.SnapshotFailed,
+                        string.Empty,
+                        "Preview player could not start.");
+                }
+
+                await playing.Task
+                    .WaitAsync(TimeSpan.FromSeconds(3), cancellationToken)
+                    .ConfigureAwait(false);
+                if (previewPlayer.VoutCount == 0)
+                {
+                    await voutReady.Task
+                        .WaitAsync(TimeSpan.FromSeconds(3), cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
+                if (!previewPlayer.IsSeekable)
+                {
+                    return ServiceResult<string>.Failure(
+                        ErrorCode.SeekNotAvailable,
+                        string.Empty,
+                        "Media is not seekable.");
+                }
+
+                previewPlayer.Time = (long)position.TotalMilliseconds;
+                await Task.Delay(80, cancellationToken).ConfigureAwait(false);
+                if (File.Exists(outputPath))
+                {
+                    File.Delete(outputPath);
+                }
+
+                if (!previewPlayer.TakeSnapshot(0, outputPath, 0, 0))
+                {
+                    return ServiceResult<string>.Failure(
+                        ErrorCode.SnapshotFailed,
+                        string.Empty,
+                        "TakeSnapshot returned false: " + outputPath);
+                }
+
+                await WaitForPreviewFileAsync(outputPath, cancellationToken).ConfigureAwait(false);
+                return File.Exists(outputPath) && new FileInfo(outputPath).Length > 0
+                    ? ServiceResult<string>.Success(outputPath)
+                    : ServiceResult<string>.Failure(
+                        ErrorCode.SnapshotFailed,
+                        string.Empty,
+                        "TakeSnapshot returned false: " + outputPath);
+            }
+            finally
+            {
+                previewPlayer.Playing -= handler;
+                previewPlayer.Vout -= voutHandler;
+                try
+                {
+                    previewPlayer.Stop();
+                }
+                catch
+                {
+                    // Preview cleanup must not affect playback.
+                }
+            }
+        }
+        catch (OperationCanceledException exception)
+        {
+            return ServiceResult<string>.Failure(
+                ErrorCode.Cancelled,
+                string.Empty,
+                "Frame preview was cancelled.",
+                exception);
+        }
+        catch (Exception exception)
+        {
+            return ServiceResult<string>.Failure(
+                ErrorCode.SnapshotFailed,
+                string.Empty,
+                "Frame preview failed.",
+                exception);
+        }
+        finally
+        {
+            _previewGate.Release();
+        }
+    }
+
+    private async Task EnsurePreviewPlayerAsync(CancellationToken cancellationToken)
+    {
+        if (_previewPlayer is not null)
+        {
+            return;
+        }
+
+        await _dispatcher.InvokeAsync(() =>
+        {
+            if (_previewPlayer is not null)
+            {
+                return;
+            }
+
+            var previewWindow = new System.Windows.Window
+            {
+                Title = "VideoPlayerFramePreview",
+                Width = 320,
+                Height = 180,
+                Left = -32000,
+                Top = -32000,
+                ShowInTaskbar = false,
+                ShowActivated = false,
+                WindowStyle = System.Windows.WindowStyle.None,
+                ResizeMode = System.Windows.ResizeMode.NoResize,
+                Background = System.Windows.Media.Brushes.Black
+            };
+            previewWindow.Show();
+            _previewWindow = previewWindow;
+            _previewPlayer = new MediaPlayer(_libVlc)
+            {
+                Hwnd = new WindowInteropHelper(previewWindow).Handle
+            };
+        }).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    private static async Task WaitForPreviewFileAsync(
+        string outputPath,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0)
+            {
+                return;
+            }
+
+            await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task DisposePreviewPlayerAsync()
+    {
+        await _previewGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            var player = Interlocked.Exchange(ref _previewPlayer, null);
+            var media = Interlocked.Exchange(ref _previewMedia, null);
+            var previewWindow = Interlocked.Exchange(ref _previewWindow, null);
+            if (player is not null)
+            {
+                try
+                {
+                    player.Stop();
+                }
+                catch
+                {
+                    // Preview cleanup must not affect main playback disposal.
+                }
+
+                player.Dispose();
+            }
+
+            media?.Dispose();
+            if (previewWindow is not null)
+            {
+                await _dispatcher.InvokeAsync(previewWindow.Close).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _previewGate.Release();
+        }
+    }
     public async ValueTask DisposeAsync()
     {
         if (!IsInitialized)
@@ -663,6 +902,7 @@ public sealed class PlayerService : IPlayerService
                 return;
             }
 
+            await DisposePreviewPlayerAsync().ConfigureAwait(false);
             UnsubscribeMediaPlayerEvents();
             StateChanged = null;
             MediaParsed = null;
