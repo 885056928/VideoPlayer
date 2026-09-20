@@ -15,8 +15,10 @@ public static class SeekHoverMath
 
     public static TimeSpan QuantizeForPreview(TimeSpan position, TimeSpan duration)
     {
-        var seconds = Math.Round(position.TotalSeconds, MidpointRounding.AwayFromZero);
-        var quantized = TimeSpan.FromSeconds(seconds);
+        var milliseconds = Math.Round(
+            position.TotalMilliseconds / 500d,
+            MidpointRounding.AwayFromZero) * 500d;
+        var quantized = TimeSpan.FromMilliseconds(milliseconds);
         return quantized > duration ? duration : quantized;
     }
 }

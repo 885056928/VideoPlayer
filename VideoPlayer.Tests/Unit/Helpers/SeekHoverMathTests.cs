@@ -9,7 +9,7 @@ public sealed class SeekHoverMathTests
     [InlineData(-10, 0)]
     [InlineData(50, 5)]
     [InlineData(150, 10)]
-    public void PositionFromRatio_ClampsToDuration(double x, int expectedSeconds)
+    public void PositionFromRatio_ClampsToDuration(double x, double expectedSeconds)
     {
         var actual = SeekHoverMath.PositionFromRatio(
             x,
@@ -20,9 +20,9 @@ public sealed class SeekHoverMathTests
     }
 
     [Theory]
-    [InlineData(5.4, 5)]
-    [InlineData(5.5, 6)]
-    public void QuantizeForPreview_UsesWholeSeconds(double input, int expectedSeconds)
+    [InlineData(5.24, 5.0)]
+    [InlineData(5.25, 5.5)]
+    public void QuantizeForPreview_UsesHalfSecondSteps(double input, double expectedSeconds)
     {
         var actual = SeekHoverMath.QuantizeForPreview(
             TimeSpan.FromSeconds(input),

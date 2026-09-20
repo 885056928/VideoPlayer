@@ -30,4 +30,4 @@ Windows desktop media tool. Dense, dark, playback-first.
 - The played portion uses the accent color; the remaining portion uses the border/control color.
 - The progress thumb is a circular ball with a visible accent outline.
 - Hovering the progress bar opens a non-interactive preview containing the hover time and a single-frame image.
-- Frame previews are debounced and isolated from main playback; preview failure falls back to time-only display.
+- Frame previews use 0.5-second nodes, a 120ms hover debounce, and a reusable hidden preview player; preview failure falls back to time-only display.
