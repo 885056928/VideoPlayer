@@ -15,12 +15,14 @@ public sealed class PlayerViewModelFixture
         Settings = new FakeSettingsService();
         Dialog = new FakeDialogService();
         Subtitle = new FakeSubtitleService();
+        History = new FakeHistoryService();
         ViewModel = new PlayerViewModel(
             Player,
             Playlist,
             Settings,
             Dialog,
-            Subtitle);
+            Subtitle,
+            History);
     }
 
     public FakePlayerService Player { get; }
@@ -28,6 +30,7 @@ public sealed class PlayerViewModelFixture
     public FakeSettingsService Settings { get; }
     public FakeDialogService Dialog { get; }
     public FakeSubtitleService Subtitle { get; }
+    public FakeHistoryService History { get; }
     public PlayerViewModel ViewModel { get; }
 }
 
@@ -304,4 +307,63 @@ public sealed class FakeDialogService : IDialogService
         TimeSpan lastPosition,
         CancellationToken cancellationToken = default)
         => Task.FromResult(ResumeChoice.Continue);
+}
+
+public sealed class FakeHistoryService : IHistoryService
+{
+    public bool IsAvailable => true;
+
+    public ServiceResult<ResumeInfo?> ResumeInfoResult { get; set; } =
+        ServiceResult<ResumeInfo?>.Success(null);
+
+    public int StartPlaybackCallCount { get; private set; }
+
+    public int ClearCompletedCallCount { get; private set; }
+
+    public int SaveProgressCallCount { get; private set; }
+
+    public int FlushCallCount { get; private set; }
+
+    public Task<ServiceResult<ResumeInfo?>> GetResumeInfoAsync(
+        string filePath,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(ResumeInfoResult);
+
+    public Task<ServiceResult> StartPlaybackAsync(
+        string filePath,
+        string fileName,
+        TimeSpan duration,
+        CancellationToken cancellationToken = default)
+    {
+        StartPlaybackCallCount++;
+        return Task.FromResult(ServiceResult.Success());
+    }
+
+    public Task<ServiceResult> SaveProgressAsync(
+        PlaybackSnapshot snapshot,
+        CancellationToken cancellationToken = default)
+    {
+        SaveProgressCallCount++;
+        return Task.FromResult(ServiceResult.Success());
+    }
+
+    public Task<ServiceResult> MarkCompletedAsync(
+        string filePath,
+        TimeSpan duration,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(ServiceResult.Success());
+
+    public Task<ServiceResult> ClearCompletedAsync(
+        string filePath,
+        CancellationToken cancellationToken = default)
+    {
+        ClearCompletedCallCount++;
+        return Task.FromResult(ServiceResult.Success());
+    }
+
+    public Task<ServiceResult> FlushAsync(CancellationToken cancellationToken = default)
+    {
+        FlushCallCount++;
+        return Task.FromResult(ServiceResult.Success());
+    }
 }

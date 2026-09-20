@@ -45,6 +45,25 @@ public sealed class PlayerServiceTests
     }
 
     [Fact]
+    public async Task OpenAsync_SnapshotMediaPathUsesLocalFilePath()
+    {
+        var path = CreateTempMediaFile();
+        await using var service = CreateService();
+
+        try
+        {
+            var opened = await service.OpenAsync(CreateRequest(path));
+
+            Assert.True(opened.IsSuccess);
+            Assert.Equal(Path.GetFullPath(path), service.Snapshot.MediaPath);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task DisposedService_AccessorsReturnSafeDefaults()
     {
         var service = CreateService();

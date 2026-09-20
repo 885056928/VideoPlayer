@@ -1,11 +1,15 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LibVLCSharp.Shared;
+using Serilog;
+using VideoPlayer.Enums;
 using VideoPlayer.Helpers;
 using VideoPlayer.Interfaces;
 using VideoPlayer.Models;
 using VideoPlayer.Models.Events;
+using VideoPlayer.Services;
 
 namespace VideoPlayer.ViewModels;
 
@@ -17,12 +21,18 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     private readonly IPlaylistService? _playlistService;
     private readonly ISettingsService? _settingsService;
     private readonly IDialogService? _dialogService;
+    private readonly IHistoryService? _historyService;
     private readonly SemaphoreSlim _progressGate = new(1, 1);
+    private static readonly TimeSpan HistoryFlushTimeout = TimeSpan.FromSeconds(2);
     private CancellationTokenSource? _progressCts;
     private Task? _progressTask;
+    private CancellationTokenSource? _historyCts;
+    private Task? _historyTask;
+    private TimeSpan _lastSavedPosition;
     private int _disposed;
     private int _navigationVersion;
     private long _activeSessionId;
+    private long _startedSessionId = -1;
     private long _handledEndSessionId;
     private bool _isSeeking;
     private bool _isApplyingSnapshot;
@@ -45,14 +55,16 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         IPlaylistService playlistService,
         ISettingsService settingsService,
         IDialogService dialogService,
-        ISubtitleService? subtitleService = null)
+        ISubtitleService? subtitleService = null,
+        IHistoryService? historyService = null)
         : this(
             playerService,
             InlineUiDispatcher.Instance,
             playlistService,
             settingsService,
             dialogService,
-            subtitleService)
+            subtitleService,
+            historyService)
     {
     }
 
@@ -62,7 +74,8 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         IPlaylistService? playlistService,
         ISettingsService? settingsService,
         IDialogService? dialogService,
-        ISubtitleService? subtitleService = null)
+        ISubtitleService? subtitleService = null,
+        IHistoryService? historyService = null)
     {
         ArgumentNullException.ThrowIfNull(playerService);
         ArgumentNullException.ThrowIfNull(dispatcher);
@@ -73,6 +86,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         _playlistService = playlistService;
         _settingsService = settingsService;
         _dialogService = dialogService;
+        _historyService = historyService;
         _playerService.StateChanged += OnStateChanged;
         _playerService.EndReached += OnEndReached;
         _playerService.TracksChanged += OnTracksChanged;
@@ -126,6 +140,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     public async Task PauseAsync(CancellationToken cancellationToken = default)
     {
+        await FlushHistoryAsync().ConfigureAwait(false);
         var result = await _playerService.PauseAsync(cancellationToken);
         LastError = result.IsSuccess ? string.Empty : result.UserMessage;
     }
@@ -133,6 +148,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
+        await FlushHistoryAsync().ConfigureAwait(false);
         var result = await _playerService.StopAsync(cancellationToken);
         LastError = result.IsSuccess ? string.Empty : result.UserMessage;
     }
@@ -215,6 +231,8 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        await FlushHistoryAsync().ConfigureAwait(false);
+
         if (_settingsService?.Current.Player.AutoPlayNext != true)
         {
             return;
@@ -237,7 +255,8 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             next.Value!.FilePath,
             TimeSpan.Zero,
             navigationVersion,
-            CancellationToken.None);
+            CancellationToken.None,
+            flushHistory: false);
     }
 
     public void BeginSeek()
@@ -299,6 +318,8 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         {
             _progressGate.Release();
         }
+
+        await FlushHistoryAsync().ConfigureAwait(false);
     }
 
     partial void OnVolumeChanged(int value)
@@ -325,8 +346,73 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         string filePath,
         TimeSpan startPosition,
         int navigationVersion,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool flushHistory = true)
     {
+        if (IsNavigationSuperseded(navigationVersion))
+        {
+            return;
+        }
+
+        var resolvedStartPosition = startPosition;
+        if (_historyService is not null
+            && _settingsService?.Current.Player.RememberPosition == true)
+        {
+            try
+            {
+                var resume = await _historyService.GetResumeInfoAsync(
+                    filePath,
+                    cancellationToken).ConfigureAwait(false);
+                var info = resume.Value;
+                if (resume.IsSuccess
+                    && info is not null
+                    && ResumePolicy.ShouldAsk(info)
+                    && _dialogService is not null)
+                {
+                    var choice = await _dialogService.AskResumeAsync(
+                        Path.GetFileName(filePath),
+                        info.LastPosition,
+                        cancellationToken).ConfigureAwait(false);
+                    if (choice == ResumeChoice.Cancel)
+                    {
+                        return;
+                    }
+
+                    if (choice == ResumeChoice.Restart)
+                    {
+                        try
+                        {
+                            await _historyService.ClearCompletedAsync(
+                                filePath,
+                                cancellationToken).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        {
+                            throw;
+                        }
+                        catch (Exception exception)
+                        {
+                            LogHistoryFailure(exception, "Failed to clear playback history.");
+                        }
+
+                        resolvedStartPosition = TimeSpan.Zero;
+                    }
+                    else
+                    {
+                        resolvedStartPosition = info.LastPosition;
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                LogHistoryFailure(exception, "Failed to query playback history.");
+            }
+        }
+
         if (IsNavigationSuperseded(navigationVersion))
         {
             return;
@@ -339,7 +425,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             {
                 var subtitleResult = await _subtitleService.FindAutoSubtitleAsync(
                     filePath,
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
                 if (subtitleResult.IsSuccess)
                 {
                     externalSubtitlePath = subtitleResult.Value;
@@ -349,9 +435,9 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             {
                 throw;
             }
-            catch (Exception)
+            catch (Exception exception)
             {
-                // Automatic subtitle lookup is best-effort and must not block playback.
+                LogHistoryFailure(exception, "Failed to find an automatic subtitle.");
             }
         }
 
@@ -360,9 +446,18 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        if (flushHistory)
+        {
+            await FlushHistoryAsync().ConfigureAwait(false);
+            if (IsNavigationSuperseded(navigationVersion))
+            {
+                return;
+            }
+        }
+
         var request = new OpenMediaRequest(
             filePath,
-            startPosition,
+            resolvedStartPosition,
             AutoPlay: true,
             ExternalSubtitlePath: externalSubtitlePath,
             PreferredAudioLanguage: null);
@@ -374,6 +469,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 
         if (!result.IsSuccess)
         {
+            RestartHistoryFlushForActiveMedia();
             LastError = result.UserMessage;
             return;
         }
@@ -381,11 +477,13 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         var sessionInfo = result.Value;
         if (sessionInfo is null)
         {
+            RestartHistoryFlushForActiveMedia();
             LastError = "Unable to open the media.";
             return;
         }
 
         AdvanceActiveSession(sessionInfo.MediaSessionId);
+        StartHistoryFlush();
 
         var volumeResult = await _playerService.SetVolumeAsync(Volume, cancellationToken);
         if (IsNavigationSuperseded(navigationVersion))
@@ -538,6 +636,142 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    private void RestartHistoryFlushForActiveMedia()
+    {
+        if (IsDisposed || _historyService is null || _activeSessionId <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var snapshot = _playerService.Snapshot;
+            if (snapshot.MediaPath is not null
+                && snapshot.State is PlaybackState.Playing or PlaybackState.Paused)
+            {
+                StartHistoryFlush();
+            }
+        }
+        catch (Exception exception)
+        {
+            LogHistoryFailure(exception, "Failed to restart playback history persistence.");
+        }
+    }
+
+    private void StartHistoryFlush()
+    {
+        if (_historyService is null)
+        {
+            return;
+        }
+
+        var previousCts = Interlocked.Exchange(ref _historyCts, null);
+        previousCts?.Cancel();
+        previousCts?.Dispose();
+
+        var historyCts = new CancellationTokenSource();
+        Interlocked.Exchange(ref _historyCts, historyCts);
+        Interlocked.Exchange(
+            ref _historyTask,
+            RunHistoryFlushAsync(historyCts.Token));
+        _lastSavedPosition = TimeSpan.Zero;
+    }
+
+    private async Task RunHistoryFlushAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (IsDisposed
+                    || _settingsService is null
+                    || !_settingsService.Current.Player.RememberPosition)
+                {
+                    continue;
+                }
+
+                var snapshot = _playerService.Snapshot;
+                cancellationToken.ThrowIfCancellationRequested();
+                if (snapshot.MediaPath is null
+                    || Math.Abs((snapshot.Position - _lastSavedPosition).TotalSeconds) < 2)
+                {
+                    continue;
+                }
+
+                var result = await _historyService!
+                    .SaveProgressAsync(snapshot, cancellationToken)
+                    .ConfigureAwait(false);
+                if (result.IsSuccess)
+                {
+                    _lastSavedPosition = snapshot.Position;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            LogHistoryFailure(exception, "Failed to persist playback progress.");
+        }
+    }
+
+    private async Task FlushHistoryAsync()
+    {
+        var historyCts = Interlocked.Exchange(ref _historyCts, null);
+        historyCts?.Cancel();
+        var historyTask = Interlocked.Exchange(ref _historyTask, null);
+        if (historyTask is not null)
+        {
+            try
+            {
+                await historyTask.WaitAsync(HistoryFlushTimeout).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+            }
+            catch (Exception exception)
+            {
+                LogHistoryFailure(exception, "Failed to stop the history flush loop.");
+            }
+        }
+
+        historyCts?.Dispose();
+
+        if (_historyService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var flushCts = new CancellationTokenSource(HistoryFlushTimeout);
+            await _historyService.FlushAsync(flushCts.Token)
+                .WaitAsync(HistoryFlushTimeout)
+                .ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+        }
+        catch (Exception exception)
+        {
+            LogHistoryFailure(exception, "Failed to flush playback history.");
+        }
+    }
+
+    private static void LogHistoryFailure(Exception exception, string message)
+    {
+        try
+        {
+            Log.Debug(exception, message);
+        }
+        catch
+        {
+            // History failures must never affect playback.
+        }
+    }
+
     private async Task StopProgressLoopCoreAsync()
     {
         var progressCts = _progressCts;
@@ -619,9 +853,41 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private void OnStateChanged(object? sender, PlaybackStateChangedEventArgs e)
+    private async void OnStateChanged(object? sender, PlaybackStateChangedEventArgs e)
     {
-        AdvanceActiveSession(e.MediaSessionId);
+        try
+        {
+            if (IsDisposed || e.MediaSessionId <= 0)
+            {
+                return;
+            }
+
+            AdvanceActiveSession(e.MediaSessionId);
+            if (e.NewState != PlaybackState.Playing
+                || e.MediaSessionId != Interlocked.Read(ref _activeSessionId)
+                || _historyService is null
+                || Interlocked.Exchange(ref _startedSessionId, e.MediaSessionId)
+                    == e.MediaSessionId)
+            {
+                return;
+            }
+
+            var snapshot = _playerService.Snapshot;
+            if (snapshot.MediaSessionId != e.MediaSessionId
+                || snapshot.MediaPath is not { } path)
+            {
+                return;
+            }
+
+            await _historyService.StartPlaybackAsync(
+                path,
+                Path.GetFileName(path),
+                snapshot.Duration).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            LogHistoryFailure(exception, "Failed to record playback start.");
+        }
     }
 
     private async void OnEndReached(object? sender, EndReachedEventArgs e)

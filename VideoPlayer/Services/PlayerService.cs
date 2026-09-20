@@ -27,7 +27,10 @@ public sealed class PlayerService : IPlayerService
     private EventHandler<MediaPlayerLengthChangedEventArgs>? _lengthChangedHandler;
     private EventHandler<MediaParsedChangedEventArgs>? _mediaParsedChangedHandler;
     private Media? _media;
+    private string? _mediaPath;
     private long _sessionId;
+    private TimeSpan? _pendingStartPosition;
+    private long _resumeAppliedSessionId = -1;
     private int _disposed;
     private int _volume;
     private bool _isMuted;
@@ -149,10 +152,14 @@ public sealed class PlayerService : IPlayerService
             try
             {
                 newMedia = new Media(_libVlc, new Uri(path));
+                _pendingStartPosition = request.StartPosition > TimeSpan.Zero
+                    ? request.StartPosition
+                    : null;
                 sessionId = NextSessionId();
                 UnsubscribeMediaPlayerEvents();
                 _media?.Dispose();
                 _media = newMedia;
+                _mediaPath = path;
                 newMedia = null;
                 BindMediaPlayerEvents(sessionId);
                 _mediaPlayer.Media = _media;
@@ -566,11 +573,26 @@ public sealed class PlayerService : IPlayerService
 
         try
         {
+            if (state == PlaybackState.Playing)
+            {
+                ApplyPendingStartPosition(sessionId);
+            }
+
             Transition(state, sessionId);
         }
         catch (Exception exception)
         {
             HandleCallbackFailure(sessionId, exception);
+        }
+    }
+
+    private void ApplyPendingStartPosition(long sessionId)
+    {
+        if (_pendingStartPosition is { } start &&
+            Interlocked.Exchange(ref _resumeAppliedSessionId, sessionId) != sessionId)
+        {
+            _mediaPlayer.Time = (long)start.TotalMilliseconds;
+            _pendingStartPosition = null;
         }
     }
 
@@ -899,6 +921,7 @@ public sealed class PlayerService : IPlayerService
         TryDisposeNative(() => _mediaPlayer.Dispose(), "dispose MediaPlayer");
         TryDisposeNative(() => _media?.Dispose(), "dispose Media");
         _media = null;
+        _mediaPath = null;
         TryDisposeNative(() => _libVlc.Dispose(), "dispose LibVLC");
     }
 
@@ -1143,8 +1166,7 @@ public sealed class PlayerService : IPlayerService
 
     private string? GetMediaPath()
     {
-        using var media = _mediaPlayer.Media;
-        return media?.Mrl;
+        return _mediaPath;
     }
 
     private long NextSessionId()

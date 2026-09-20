@@ -38,7 +38,8 @@ public static class CompositionRoot
                 provider.GetRequiredService<IPlaylistService>(),
                 provider.GetRequiredService<ISettingsService>(),
                 provider.GetRequiredService<IDialogService>(),
-                provider.GetRequiredService<ISubtitleService>()));
+                provider.GetRequiredService<ISubtitleService>(),
+                provider.GetRequiredService<IHistoryService>()));
         services.AddSingleton<PlaylistViewModel>();
         services.AddSingleton<MainViewModel>();
         return services.BuildServiceProvider(new ServiceProviderOptions

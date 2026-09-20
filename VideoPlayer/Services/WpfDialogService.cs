@@ -13,7 +13,8 @@ public sealed class WpfDialogService : IDialogService
         CancellationToken cancellationToken = default)
     {
         var result = MessageBox.Show(
-            "是否继续播放 " + fileName + "？\n\n上次播放位置：" + lastPosition,
+            "是否继续播放 " + fileName + "？\n\n上次播放位置：" +
+            lastPosition.ToString(@"hh\:mm\:ss"),
             "继续播放",
             MessageBoxButton.YesNoCancel,
             MessageBoxImage.Question);
