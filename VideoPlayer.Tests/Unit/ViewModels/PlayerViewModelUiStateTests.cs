@@ -13,8 +13,9 @@ public sealed class PlayerViewModelUiStateTests
     {
         var fixture = new PlayerViewModelFixture(sessionId: 31);
         await using var viewModel = fixture.ViewModel;
+        await viewModel.OpenAsync("movie.mp4");
 
-        fixture.Player.RaiseStateChanged(PlaybackState.None, PlaybackState.Opening);
+        fixture.Player.RaiseStateChanged(PlaybackState.Playing, PlaybackState.Opening);
 
         Assert.Equal(PlaybackState.Opening, viewModel.PlaybackState);
         Assert.True(viewModel.IsOpening);
@@ -25,7 +26,8 @@ public sealed class PlayerViewModelUiStateTests
     {
         var fixture = new PlayerViewModelFixture(sessionId: 32);
         await using var viewModel = fixture.ViewModel;
-        fixture.Player.RaiseStateChanged(PlaybackState.None, PlaybackState.Opening);
+        await viewModel.OpenAsync("movie.mp4");
+        fixture.Player.RaiseStateChanged(PlaybackState.Playing, PlaybackState.Opening);
 
         fixture.Player.RaiseStateChanged(PlaybackState.Opening, PlaybackState.Playing);
 

@@ -207,12 +207,100 @@ public sealed class HistoryServiceTests
             Path.Combine(Path.GetTempPath(), "Movie.mp4"),
             "Movie.mp4",
             TimeSpan.FromMinutes(2),
-            cancellation.Token);
+            cancellationToken: cancellation.Token);
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ErrorCode.Cancelled, result.ErrorCode);
         Assert.True(service.IsAvailable);
     }
+    [Fact]
+    public async Task SaveProgressAsync_OlderSession_DoesNotOverwriteNewerProgress()
+    {
+        await using var fixture = await DatabaseFixture.CreateAsync();
+        var service = new HistoryService(fixture.Factory);
+        var filePath = Path.Combine(fixture.Root, "Videos", "Movie.mp4");
+        var duration = TimeSpan.FromMinutes(10);
+        await service.SaveProgressAsync(CreateSnapshot(filePath, duration, 100, 2));
+
+        var stale = await service.SaveProgressAsync(CreateSnapshot(filePath, duration, 20, 1));
+
+        Assert.True(stale.IsSuccess);
+        await using var context = await fixture.Factory.CreateDbContextAsync();
+        var row = Assert.Single(await context.PlaybackHistory.AsNoTracking().ToListAsync());
+        Assert.Equal(TimeSpan.FromSeconds(100).Ticks, row.LastPositionTicks);
+    }
+
+    [Fact]
+    public async Task SaveProgressAsync_AtNinetyFivePercent_MarksCompleted()
+    {
+        await using var fixture = await DatabaseFixture.CreateAsync();
+        var service = new HistoryService(fixture.Factory);
+        var filePath = Path.Combine(fixture.Root, "Videos", "Movie.mp4");
+        var duration = TimeSpan.FromMinutes(10);
+
+        var result = await service.SaveProgressAsync(CreateSnapshot(filePath, duration, 570, 3));
+
+        Assert.True(result.IsSuccess);
+        await using var context = await fixture.Factory.CreateDbContextAsync();
+        var row = Assert.Single(await context.PlaybackHistory.AsNoTracking().ToListAsync());
+        Assert.True(row.IsCompleted);
+        Assert.Equal(0, row.LastPositionTicks);
+    }
+
+    [Fact]
+    public async Task StartPlaybackAsync_UsesSuppliedFileName()
+    {
+        await using var fixture = await DatabaseFixture.CreateAsync();
+        var service = new HistoryService(fixture.Factory);
+        var filePath = Path.Combine(fixture.Root, "Videos", "Physical.mp4");
+
+        var result = await service.StartPlaybackAsync(
+            filePath,
+            "DisplayName.mp4",
+            TimeSpan.FromMinutes(2));
+
+        Assert.True(result.IsSuccess);
+        await using var context = await fixture.Factory.CreateDbContextAsync();
+        var row = Assert.Single(await context.PlaybackHistory.AsNoTracking().ToListAsync());
+        Assert.Equal("DisplayName.mp4", row.FileName);
+    }
+
+    [Fact]
+    public async Task SetAvailableFalse_SkipsDatabaseQueries()
+    {
+        var factory = new ThrowingDbContextFactory();
+        var service = new HistoryService(factory);
+        service.SetAvailable(false);
+
+        var resume = await service.GetResumeInfoAsync("Movie.mp4");
+        var save = await service.SaveProgressAsync(CreateSnapshot("Movie.mp4", TimeSpan.FromMinutes(1), 1, 1));
+
+        Assert.True(resume.IsSuccess);
+        Assert.Null(resume.Value);
+        Assert.False(save.IsSuccess);
+        Assert.Equal(ErrorCode.DatabaseUnavailable, save.ErrorCode);
+        Assert.Equal(0, factory.CreateCount);
+    }
+
+    private static PlaybackSnapshot CreateSnapshot(
+        string filePath,
+        TimeSpan duration,
+        double positionSeconds,
+        long sessionId)
+        => new(
+            sessionId,
+            PlaybackState.Playing,
+            filePath,
+            TimeSpan.FromSeconds(positionSeconds),
+            duration,
+            80,
+            false,
+            1.0,
+            true,
+            true,
+            true,
+            DateTimeOffset.UtcNow);
+
     private sealed class DatabaseFixture : IAsyncDisposable
     {
         private DatabaseFixture(
@@ -249,6 +337,24 @@ public sealed class HistoryServiceTests
             SqliteConnection.ClearAllPools();
             Directory.Delete(Root, true);
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class ThrowingDbContextFactory : IDbContextFactory<VideoPlayerDbContext>
+    {
+        public int CreateCount { get; private set; }
+
+        public VideoPlayerDbContext CreateDbContext()
+        {
+            CreateCount++;
+            throw new InvalidOperationException("Factory must not be called.");
+        }
+
+        public Task<VideoPlayerDbContext> CreateDbContextAsync(
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(CreateDbContext());
         }
     }
 

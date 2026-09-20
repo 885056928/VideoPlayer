@@ -54,6 +54,38 @@ public sealed class HistoryServiceCoverageTests
         Assert.True(flushed.IsSuccess);
     }
 
+    [Fact]
+    public async Task DatabaseOperationTimeout_MarksHistoryUnavailableWithinShortBudget()
+    {
+        var service = new HistoryService(new DelayingDbContextFactory());
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        var result = await service.GetResumeInfoAsync("Movie.mp4");
+
+        stopwatch.Stop();
+        Assert.False(result.IsSuccess);
+        Assert.Equal(ErrorCode.DatabaseUnavailable, result.ErrorCode);
+        Assert.False(service.IsAvailable);
+        Assert.True(
+            stopwatch.Elapsed < TimeSpan.FromSeconds(4),
+            $"Database timeout returned after {stopwatch.Elapsed.TotalSeconds:F2} seconds.");
+    }
+
+    private sealed class DelayingDbContextFactory : IDbContextFactory<VideoPlayerDbContext>
+    {
+        public VideoPlayerDbContext CreateDbContext()
+        {
+            throw new InvalidOperationException("Use async factory.");
+        }
+
+        public async Task<VideoPlayerDbContext> CreateDbContextAsync(
+            CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+            throw new InvalidOperationException("Delay should have been canceled.");
+        }
+    }
+
     private sealed class ThrowingDbContextFactory : IDbContextFactory<VideoPlayerDbContext>
     {
         public VideoPlayerDbContext CreateDbContext()

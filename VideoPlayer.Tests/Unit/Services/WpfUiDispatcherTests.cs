@@ -29,7 +29,7 @@ public sealed class WpfUiDispatcherTests
     }
 
     [StaFact]
-    public void ActiveDispatcher_ExecutesPostAndInvokeOperations()
+    public async Task ActiveDispatcher_ExecutesPostAndInvokeOperations()
     {
         var dispatcher = Dispatcher.CurrentDispatcher;
         var subject = new WpfUiDispatcher(dispatcher);
@@ -46,9 +46,9 @@ public sealed class WpfUiDispatcherTests
         Dispatcher.PushFrame(frame);
 
         Assert.True(subject.CheckAccess());
+        await invokeTask;
         Assert.True(postExecuted);
         Assert.True(actionExecuted);
-        Assert.True(invokeTask.IsCompletedSuccessfully);
-        Assert.Equal(42, resultTask.GetAwaiter().GetResult());
+        Assert.Equal(42, await resultTask);
     }
 }

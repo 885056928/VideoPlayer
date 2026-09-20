@@ -19,11 +19,13 @@ public sealed record FullscreenState(
 public sealed class FullscreenController
 {
     private readonly Window _window;
+    private readonly Action<bool>? _fullscreenChanged;
     private FullscreenState? _saved;
 
-    public FullscreenController(Window window)
+    public FullscreenController(Window window, Action<bool>? fullscreenChanged = null)
     {
         _window = window;
+        _fullscreenChanged = fullscreenChanged;
     }
 
     public bool IsFullscreen => _saved is not null;
@@ -55,6 +57,7 @@ public sealed class FullscreenController
         _window.WindowStyle = WindowStyle.None;
         _window.ResizeMode = ResizeMode.NoResize;
         _window.WindowState = WindowState.Maximized;
+        _fullscreenChanged?.Invoke(true);
     }
 
     public void Exit()
@@ -72,5 +75,6 @@ public sealed class FullscreenController
         _window.Width = state.Bounds.Width;
         _window.Height = state.Bounds.Height;
         _saved = null;
+        _fullscreenChanged?.Invoke(false);
     }
 }

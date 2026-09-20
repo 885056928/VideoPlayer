@@ -75,6 +75,30 @@ public partial class PlayerView : UserControl, IDisposable
         }
     }
 
+    private async void AddSubtitle_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (DataContext is not PlayerViewModel viewModel)
+            {
+                return;
+            }
+
+            var dialog = new OpenFileDialog
+            {
+                Filter = "字幕文件|*.srt;*.ass;*.ssa|所有文件|*.*"
+            };
+            if (dialog.ShowDialog() == true)
+            {
+                await viewModel.AddSubtitleAsync(dialog.FileName);
+            }
+        }
+        catch (Exception exception)
+        {
+            Serilog.Log.Warning(exception, "Manual subtitle selection failed.");
+        }
+    }
+
     private void SeekSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (DataContext is PlayerViewModel viewModel)

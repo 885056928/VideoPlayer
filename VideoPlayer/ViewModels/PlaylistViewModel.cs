@@ -10,8 +10,10 @@ namespace VideoPlayer.ViewModels;
 
 public sealed partial class PlaylistViewModel : ObservableObject
 {
+    private const int BulkReplaceThreshold = 128;
     private readonly IPlaylistService _playlistService;
     private readonly IUiDispatcher _uiDispatcher;
+    private readonly BulkObservableCollection<PlaylistItem> _items = [];
 
     public PlaylistViewModel(IPlaylistService playlistService, IUiDispatcher uiDispatcher)
     {
@@ -21,32 +23,54 @@ public sealed partial class PlaylistViewModel : ObservableObject
         _playlistService = playlistService;
         _uiDispatcher = uiDispatcher;
         _playlistService.PlaylistChanged += OnPlaylistChanged;
+        _playlistService.CurrentChanged += OnPlaylistChanged;
     }
 
-    public ObservableCollection<PlaylistItem> Items { get; } = [];
+    public ObservableCollection<PlaylistItem> Items => _items;
+
+    public event EventHandler<PlaylistItem?>? PlayRequested;
+
+    [ObservableProperty]
+    private PlaylistItem? _selectedItem;
 
     [ObservableProperty]
     private string _lastError = string.Empty;
 
-    public async Task AddPathsAsync(IEnumerable<string> paths)
+    public async Task<ServiceResult<IReadOnlyList<PlaylistItem>>> AddPathsAsync(
+        IEnumerable<string> paths,
+        bool recursive = false,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(paths);
-
-        var result = await _playlistService.AddFilesAsync(paths, recursive: false);
+        var result = await _playlistService.AddFilesAsync(
+            paths,
+            recursive,
+            cancellationToken);
         LastError = result.IsSuccess ? string.Empty : result.UserMessage;
+        return result;
     }
 
-    public async Task AddFolderAsync(string folderPath)
+    public async Task<ServiceResult> AddFolderAsync(
+        string folderPath,
+        bool recursive = false,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(folderPath);
-
-        var result = await _playlistService.AddFolderAsync(folderPath, recursive: false);
+        var result = await _playlistService.AddFolderAsync(
+            folderPath,
+            recursive,
+            cancellationToken);
         LastError = result.IsSuccess ? string.Empty : result.UserMessage;
+        return result;
     }
 
-    public async Task RemoveAsync(PlaylistItem item)
+    [RelayCommand]
+    public async Task RemoveAsync(PlaylistItem? item)
     {
-        ArgumentNullException.ThrowIfNull(item);
+        if (item is null)
+        {
+            return;
+        }
 
         var result = await _playlistService.RemoveAsync(item.FilePath);
         LastError = result.IsSuccess ? string.Empty : result.UserMessage;
@@ -59,6 +83,14 @@ public sealed partial class PlaylistViewModel : ObservableObject
         LastError = result.IsSuccess ? string.Empty : result.UserMessage;
     }
 
+    public void RequestPlay(PlaylistItem? item)
+    {
+        if (item is not null)
+        {
+            PlayRequested?.Invoke(this, item);
+        }
+    }
+
     private void OnPlaylistChanged(object? sender, EventArgs e)
     {
         _uiDispatcher.Post(ApplyPlaylistChanges);
@@ -69,7 +101,12 @@ public sealed partial class PlaylistViewModel : ObservableObject
         var targetItems = _playlistService.Items;
         if (targetItems.Count == 0)
         {
-            Items.Clear();
+            if (_items.Count > 0)
+            {
+                _items.ReplaceAll([]);
+            }
+
+            SelectedItem = null;
             return;
         }
 
@@ -87,30 +124,33 @@ public sealed partial class PlaylistViewModel : ObservableObject
             }
         }
 
-        if (isSharedPrefix && targetItems.Count >= Items.Count)
+        if (!isSharedPrefix || targetItems.Count - Items.Count >= BulkReplaceThreshold)
+        {
+            _items.ReplaceAll(targetItems);
+        }
+        else if (targetItems.Count >= Items.Count)
         {
             for (var index = Items.Count; index < targetItems.Count; index++)
             {
                 Items.Add(targetItems[index]);
             }
-
-            return;
         }
-
-        if (isSharedPrefix)
+        else
         {
             while (Items.Count > targetItems.Count)
             {
                 Items.RemoveAt(Items.Count - 1);
             }
-
-            return;
         }
 
-        Items.Clear();
-        foreach (var item in targetItems)
+        if (SelectedItem is not null
+            && !targetItems.Any(
+                item => string.Equals(
+                    item.FilePath,
+                    SelectedItem.FilePath,
+                    StringComparison.OrdinalIgnoreCase)))
         {
-            Items.Add(item);
+            SelectedItem = null;
         }
     }
 }

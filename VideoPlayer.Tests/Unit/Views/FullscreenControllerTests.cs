@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using VideoPlayer.Views;
 using Xunit;
 
@@ -16,6 +17,19 @@ public sealed class FullscreenControllerTests
 
         Assert.Equal(System.Windows.WindowStyle.SingleBorderWindow, state.Style);
         Assert.Equal(800, state.Bounds.Width);
+    }
+
+    [WpfFact]
+    public void Toggle_NotifiesFullscreenChanges()
+    {
+        var window = new System.Windows.Window();
+        var states = new List<bool>();
+        var controller = new FullscreenController(window, states.Add);
+
+        controller.Toggle();
+        controller.Toggle();
+
+        Assert.Equal([true, false], states);
     }
 
     [WpfFact]

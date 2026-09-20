@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using Serilog;
 using VideoPlayer.Configuration;
 using VideoPlayer.Enums;
 using VideoPlayer.Interfaces;
@@ -45,6 +46,16 @@ public sealed class SettingsService : ISettingsService
                 var loaded = await ReadAsync(_paths.ConfigPath, cancellationToken);
                 if (loaded is not null)
                 {
+                    if (loaded.SchemaVersion > AppSettings.CurrentSchemaVersion)
+                    {
+                        Log.Warning(
+                            "Configuration schema {SchemaVersion} is newer than supported schema {SupportedSchemaVersion}; using defaults.",
+                            loaded.SchemaVersion,
+                            AppSettings.CurrentSchemaVersion);
+                        Current = AppSettings.CreateDefault();
+                        return ServiceResult.Success();
+                    }
+
                     Current = SettingsValidator.Normalize(loaded);
                     return ServiceResult.Success();
                 }
@@ -55,6 +66,16 @@ public sealed class SettingsService : ISettingsService
                 var backup = await ReadAsync(_paths.ConfigBackupPath, cancellationToken);
                 if (backup is not null)
                 {
+                    if (backup.SchemaVersion > AppSettings.CurrentSchemaVersion)
+                    {
+                        Log.Warning(
+                            "Backup configuration schema {SchemaVersion} is newer than supported schema {SupportedSchemaVersion}; using defaults.",
+                            backup.SchemaVersion,
+                            AppSettings.CurrentSchemaVersion);
+                        Current = AppSettings.CreateDefault();
+                        return ServiceResult.Success();
+                    }
+
                     Current = SettingsValidator.Normalize(backup);
                     return await SaveCoreAsync(createBackup: false, cancellationToken);
                 }

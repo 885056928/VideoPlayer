@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using VideoPlayer.Configuration;
 using VideoPlayer.Database;
+using VideoPlayer.Enums;
 using VideoPlayer.Models;
 using Xunit;
 
@@ -69,6 +70,26 @@ public sealed class DatabaseInitializerTests
     }
 
     [Fact]
+    public async Task InitializeAsync_CoreDirectoryFailure_ReturnsDatabaseUnavailable()
+    {
+        var rootFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        await File.WriteAllTextAsync(rootFile, "not a directory");
+        try
+        {
+            var paths = new AppPaths(rootFile);
+
+            var result = await new DatabaseInitializer(paths).InitializeAsync();
+
+            Assert.False(result.IsSuccess);
+            Assert.Equal(ErrorCode.DatabaseUnavailable, result.ErrorCode);
+        }
+        finally
+        {
+            File.Delete(rootFile);
+        }
+    }
+
+    [Fact]
     public async Task InitializeAsync_RecoversCorruptDatabase()
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -82,7 +103,11 @@ public sealed class DatabaseInitializerTests
 
             Assert.True(result.IsSuccess, result.TechnicalMessage);
             Assert.True(File.Exists(paths.DatabasePath));
-            Assert.Single(Directory.GetFiles(root, "VideoPlayer.corrupt.*.db"));
+            var backup = Assert.Single(Directory.GetFiles(root, "VideoPlayer.corrupt.*.db"));
+            var timestamp = Path.GetFileNameWithoutExtension(backup)
+                .Split('.')
+                .Last();
+            Assert.Matches("^\\d{17}$", timestamp);
         }
         finally
         {

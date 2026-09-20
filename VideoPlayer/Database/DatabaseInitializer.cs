@@ -18,14 +18,23 @@ public sealed class DatabaseInitializer
 
     public async Task<ServiceResult> InitializeAsync(CancellationToken cancellationToken = default)
     {
-        _paths.EnsureCoreDirectories();
         try
         {
+            _paths.EnsureCoreDirectories();
             await MigrateAsync(cancellationToken);
             return ServiceResult.Success();
         }
         catch (Exception firstFailure)
         {
+            if (firstFailure is UnauthorizedAccessException or IOException)
+            {
+                return ServiceResult.Failure(
+                    ErrorCode.DatabaseUnavailable,
+                    "播放历史暂时不可用。",
+                    firstFailure.Message,
+                    firstFailure);
+            }
+
             try
             {
                 await RecoverAsync(cancellationToken);
@@ -45,11 +54,24 @@ public sealed class DatabaseInitializer
 
     private async Task MigrateAsync(CancellationToken cancellationToken)
     {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
         var options = new DbContextOptionsBuilder<VideoPlayerDbContext>()
-            .UseSqlite("Data Source=" + _paths.DatabasePath)
+            .UseSqlite(GetConnectionString())
             .Options;
         await using var context = new VideoPlayerDbContext(options);
-        await context.Database.MigrateAsync(cancellationToken);
+        await context.Database.MigrateAsync(timeoutCts.Token);
+    }
+
+    private string GetConnectionString()
+    {
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = _paths.DatabasePath,
+            DefaultTimeout = 2,
+            Pooling = false
+        };
+        return builder.ToString();
     }
 
     private async Task RecoverAsync(CancellationToken cancellationToken)
@@ -60,7 +82,7 @@ public sealed class DatabaseInitializer
         {
             var backup = Path.Combine(
                 _paths.RootDirectory,
-                "VideoPlayer.corrupt." + DateTime.UtcNow.ToString("yyyyMMddHHmmss") + ".db");
+                "VideoPlayer.corrupt." + DateTime.UtcNow.ToString("yyyyMMddHHmmssfff") + ".db");
             File.Move(_paths.DatabasePath, backup, overwrite: false);
         }
 

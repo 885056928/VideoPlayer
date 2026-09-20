@@ -26,6 +26,9 @@ public sealed class PlayerService : IPlayerService
     private EventHandler<EventArgs>? _encounteredErrorHandler;
     private EventHandler<MediaPlayerLengthChangedEventArgs>? _lengthChangedHandler;
     private EventHandler<MediaParsedChangedEventArgs>? _mediaParsedChangedHandler;
+    private EventHandler<MediaPlayerESAddedEventArgs>? _esAddedHandler;
+    private EventHandler<MediaPlayerESDeletedEventArgs>? _esDeletedHandler;
+    private EventHandler<MediaPlayerESSelectedEventArgs>? _esSelectedHandler;
     private Media? _media;
     private string? _mediaPath;
     private long _sessionId;
@@ -37,6 +40,10 @@ public sealed class PlayerService : IPlayerService
     private double _rate = 1.0;
     private long _lastTracksSessionId;
     private PlayerTrackInfo[] _lastTracks = [];
+    private long _endedSessionId = -1;
+    private long _failedSessionId = -1;
+    private string? _externalSubtitlePath;
+    private readonly HashSet<int> _externalSubtitleTrackIds = [];
 
     public PlayerService(
         IUiDispatcher dispatcher,
@@ -152,12 +159,23 @@ public sealed class PlayerService : IPlayerService
             try
             {
                 newMedia = new Media(_libVlc, new Uri(path));
+                StopAndResetCurrentSession();
+                UnsubscribeMediaPlayerEvents();
+                _mediaPlayer.Media = null;
+                _media?.Dispose();
+                _media = null;
+                _mediaPath = null;
                 _pendingStartPosition = request.StartPosition > TimeSpan.Zero
                     ? request.StartPosition
                     : null;
+                _resumeAppliedSessionId = -1;
+                _externalSubtitlePath = null;
+                _externalSubtitleTrackIds.Clear();
+                _lastTracksSessionId = -1;
+                _lastTracks = [];
                 sessionId = NextSessionId();
-                UnsubscribeMediaPlayerEvents();
-                _media?.Dispose();
+                _endedSessionId = -1;
+                _failedSessionId = -1;
                 _media = newMedia;
                 _mediaPath = path;
                 newMedia = null;
@@ -168,9 +186,18 @@ public sealed class PlayerService : IPlayerService
                 Transition(PlaybackState.Opening, sessionId);
                 PostMediaOpened(sessionId, path);
 
-                if (request.AutoPlay)
+                if (request.AutoPlay && !_mediaPlayer.Play())
                 {
-                    _mediaPlayer.Play();
+                    Transition(PlaybackState.Error, sessionId);
+                    RaiseFailure(
+                        sessionId,
+                        ErrorCode.InvalidState,
+                        "无法开始播放。",
+                        null);
+                    return ServiceResult<MediaSessionInfo>.Failure(
+                        ErrorCode.InvalidState,
+                        "无法开始播放。",
+                        "MediaPlayer.Play returned false.");
                 }
 
                 return ServiceResult<MediaSessionInfo>.Success(
@@ -225,12 +252,22 @@ public sealed class PlayerService : IPlayerService
                     "No media");
             }
 
-            return _mediaPlayer.Play()
-                ? ServiceResult.Success()
-                : ServiceResult.Failure(
-                    ErrorCode.InvalidState,
-                    "无法开始播放。",
-                    "MediaPlayer.Play returned false.");
+            var sessionId = GetCurrentSessionId();
+            if (_mediaPlayer.Play())
+            {
+                return ServiceResult.Success();
+            }
+
+            Transition(PlaybackState.Error, sessionId);
+            RaiseFailure(
+                sessionId,
+                ErrorCode.InvalidState,
+                "无法开始播放。",
+                null);
+            return ServiceResult.Failure(
+                ErrorCode.InvalidState,
+                "无法开始播放。",
+                "MediaPlayer.Play returned false.");
         }
         finally
         {
@@ -442,12 +479,18 @@ public sealed class PlayerService : IPlayerService
                     "PlayerService is disposed.");
             }
 
-            return _mediaPlayer.SetAudioTrack(trackId)
+            var result = _mediaPlayer.SetAudioTrack(trackId)
                 ? ServiceResult.Success()
                 : ServiceResult.Failure(
                     ErrorCode.TrackNotFound,
                     "音轨不可用。",
                     $"Track {trackId}");
+            if (result.IsSuccess)
+            {
+                PublishCurrentTracks();
+            }
+
+            return result;
         }
         finally
         {
@@ -470,12 +513,18 @@ public sealed class PlayerService : IPlayerService
                     "PlayerService is disposed.");
             }
 
-            return _mediaPlayer.SetSpu(trackId ?? -1)
+            var result = _mediaPlayer.SetSpu(trackId ?? -1)
                 ? ServiceResult.Success()
                 : ServiceResult.Failure(
                     ErrorCode.TrackNotFound,
                     "字幕轨不可用。",
                     $"Track {trackId}");
+            if (result.IsSuccess)
+            {
+                PublishCurrentTracks();
+            }
+
+            return result;
         }
         finally
         {
@@ -522,12 +571,19 @@ public sealed class PlayerService : IPlayerService
                     exception);
             }
 
-            return _mediaPlayer.AddSlave(MediaSlaveType.Subtitle, uri, select)
+            _externalSubtitlePath = filePath;
+            var result = _mediaPlayer.AddSlave(MediaSlaveType.Subtitle, uri, select)
                 ? ServiceResult.Success()
                 : ServiceResult.Failure(
                     ErrorCode.SubtitleNotFound,
                     "字幕加载失败。",
                     filePath);
+            if (result.IsSuccess)
+            {
+                PublishCurrentTracks();
+            }
+
+            return result;
         }
         finally
         {
@@ -612,6 +668,7 @@ public sealed class PlayerService : IPlayerService
             TracksChanged = null;
             MediaOpened = null;
             PlaybackFailed = null;
+            EndReached = null;
             DisposePlayerSafely();
         }
         finally
@@ -652,9 +709,84 @@ public sealed class PlayerService : IPlayerService
         }
     }
 
+    private void StopAndResetCurrentSession()
+    {
+        var sessionId = GetCurrentSessionId();
+        if (sessionId <= 0 && _media is null)
+        {
+            return;
+        }
+
+        var state = GetCurrentState();
+        try
+        {
+            _mediaPlayer.Stop();
+        }
+        catch (Exception exception)
+        {
+            TryLogCallbackFailure(
+                exception,
+                "Failed to stop the previous media session {MediaSessionId}.",
+                sessionId);
+        }
+
+        if (state is PlaybackState.Opening or PlaybackState.Playing or PlaybackState.Paused)
+        {
+            Transition(PlaybackState.Stopped, sessionId);
+        }
+    }
+
+    private void PublishCurrentTracks()
+    {
+        var sessionId = GetCurrentSessionId();
+        if (sessionId <= 0 || !IsCurrentSession(sessionId))
+        {
+            return;
+        }
+
+        _lastTracksSessionId = -1;
+        RaiseTracksChanged(sessionId, GetAllTracksCore());
+    }
+
+    private bool TryMarkEnded(long sessionId)
+    {
+        lock (_stateSync)
+        {
+            if (_endedSessionId == sessionId)
+            {
+                return false;
+            }
+
+            _endedSessionId = sessionId;
+            return true;
+        }
+    }
+
+    private bool TryMarkFailed(long sessionId)
+    {
+        lock (_stateSync)
+        {
+            if (_failedSessionId == sessionId)
+            {
+                return false;
+            }
+
+            _failedSessionId = sessionId;
+            return true;
+        }
+    }
+
+    private PlaybackState GetCurrentState()
+    {
+        lock (_stateSync)
+        {
+            return _stateMachine.Current;
+        }
+    }
+
     internal void HandleEndReached(long sessionId)
     {
-        if (!IsCurrentSession(sessionId))
+        if (!IsCurrentSession(sessionId) || !TryMarkEnded(sessionId))
         {
             return;
         }
@@ -848,8 +980,29 @@ public sealed class PlayerService : IPlayerService
                 track.Name ?? $"字幕 {track.Id}",
                 track.Name ?? "und",
                 track.Id == _mediaPlayer.Spu,
-                false))
+                IsExternalSubtitleTrack(track)))
             .ToArray();
+    }
+
+    private bool IsExternalSubtitleTrack(LibVLCSharp.Shared.Structures.TrackDescription track)
+    {
+        lock (_stateSync)
+        {
+            if (_externalSubtitleTrackIds.Contains(track.Id))
+            {
+                return true;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(_externalSubtitlePath))
+        {
+            return false;
+        }
+
+        var externalName = Path.GetFileNameWithoutExtension(_externalSubtitlePath);
+        return !string.IsNullOrWhiteSpace(externalName)
+            && !string.IsNullOrWhiteSpace(track.Name)
+            && track.Name.Contains(externalName, StringComparison.OrdinalIgnoreCase);
     }
 
     private PlayerTrackInfo[] GetAllTracksCore()
@@ -879,6 +1032,7 @@ public sealed class PlayerService : IPlayerService
                 return;
             }
 
+            _externalSubtitlePath = path;
             if (!_mediaPlayer.AddSlave(
                     MediaSlaveType.Subtitle,
                     new Uri(path).AbsoluteUri,
@@ -908,6 +1062,9 @@ public sealed class PlayerService : IPlayerService
         _encounteredErrorHandler = (_, _) => HandleMediaError(sessionId);
         _lengthChangedHandler = (_, e) => HandleLengthChanged(sessionId, e.Length);
         _mediaParsedChangedHandler = (_, e) => HandleMediaParsedChanged(sessionId, e.ParsedStatus);
+        _esAddedHandler = (_, e) => HandleEsChanged(sessionId, e.Type, e.Id, added: true);
+        _esDeletedHandler = (_, e) => HandleEsChanged(sessionId, e.Type, e.Id, added: false);
+        _esSelectedHandler = (_, e) => HandleEsChanged(sessionId, e.Type, e.Id, added: null);
 
         _mediaPlayer.Opening += _openingHandler;
         _mediaPlayer.Playing += _playingHandler;
@@ -916,7 +1073,58 @@ public sealed class PlayerService : IPlayerService
         _mediaPlayer.EndReached += _endReachedHandler;
         _mediaPlayer.EncounteredError += _encounteredErrorHandler;
         _mediaPlayer.LengthChanged += _lengthChangedHandler;
+        _mediaPlayer.ESAdded += _esAddedHandler;
+        _mediaPlayer.ESDeleted += _esDeletedHandler;
+        _mediaPlayer.ESSelected += _esSelectedHandler;
         _media!.ParsedChanged += _mediaParsedChangedHandler;
+    }
+
+    private void HandleEsChanged(
+        long sessionId,
+        TrackType type,
+        int trackId,
+        bool? added)
+    {
+        if (!IsCurrentSession(sessionId))
+        {
+            return;
+        }
+
+        if (added == true && type == TrackType.Text && _externalSubtitlePath is not null)
+        {
+            lock (_stateSync)
+            {
+                _externalSubtitleTrackIds.Add(trackId);
+            }
+        }
+        else if (added == false && type == TrackType.Text)
+        {
+            lock (_stateSync)
+            {
+                _externalSubtitleTrackIds.Remove(trackId);
+            }
+        }
+
+        try
+        {
+            _dispatcher.Post(() =>
+            {
+                if (!IsCurrentSession(sessionId))
+                {
+                    return;
+                }
+
+                _lastTracksSessionId = -1;
+                RaiseTracksChanged(sessionId, GetAllTracksCore());
+            });
+        }
+        catch (Exception exception)
+        {
+            TryLogCallbackFailure(
+                exception,
+                "Failed to refresh tracks for media session {MediaSessionId}.",
+                sessionId);
+        }
     }
 
     private void UnsubscribeMediaPlayerEvents()
@@ -961,6 +1169,21 @@ public sealed class PlayerService : IPlayerService
             _media.ParsedChanged -= _mediaParsedChangedHandler;
         }
 
+        if (_esAddedHandler is not null)
+        {
+            _mediaPlayer.ESAdded -= _esAddedHandler;
+        }
+
+        if (_esDeletedHandler is not null)
+        {
+            _mediaPlayer.ESDeleted -= _esDeletedHandler;
+        }
+
+        if (_esSelectedHandler is not null)
+        {
+            _mediaPlayer.ESSelected -= _esSelectedHandler;
+        }
+
         _openingHandler = null;
         _playingHandler = null;
         _pausedHandler = null;
@@ -969,6 +1192,9 @@ public sealed class PlayerService : IPlayerService
         _encounteredErrorHandler = null;
         _lengthChangedHandler = null;
         _mediaParsedChangedHandler = null;
+        _esAddedHandler = null;
+        _esDeletedHandler = null;
+        _esSelectedHandler = null;
     }
 
     private void DisposePlayerSafely()
@@ -1076,7 +1302,7 @@ public sealed class PlayerService : IPlayerService
         string message,
         Exception? exception)
     {
-        if (!IsCurrentSession(sessionId))
+        if (!IsCurrentSession(sessionId) || !TryMarkFailed(sessionId))
         {
             return;
         }

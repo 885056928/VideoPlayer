@@ -224,6 +224,62 @@ public sealed class SettingsServiceTests
             Directory.Delete(root, true);
         }
     }
+    [Fact]
+    public async Task LoadAsync_NewerSchema_UsesDefaultsAndSucceeds()
+    {
+        var root = CreateRoot();
+        try
+        {
+            var paths = new AppPaths(root);
+            paths.EnsureCoreDirectories();
+            var newer = AppSettings.CreateDefault();
+            newer.SchemaVersion = AppSettings.CurrentSchemaVersion + 1;
+            newer.Player.DefaultVolume = 12;
+            await File.WriteAllTextAsync(
+                paths.ConfigPath,
+                JsonSerializer.Serialize(newer));
+            var service = new SettingsService(paths);
+
+            var result = await service.LoadAsync();
+
+            Assert.True(result.IsSuccess);
+            Assert.Equal(AppSettings.CurrentSchemaVersion, service.Current.SchemaVersion);
+            Assert.Equal(80, service.Current.Player.DefaultVolume);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task LoadAsync_NewerBackupSchema_UsesDefaults()
+    {
+        var root = CreateRoot();
+        try
+        {
+            var paths = new AppPaths(root);
+            paths.EnsureCoreDirectories();
+            await File.WriteAllTextAsync(paths.ConfigPath, "{ broken");
+            var newer = AppSettings.CreateDefault();
+            newer.SchemaVersion = AppSettings.CurrentSchemaVersion + 1;
+            newer.Player.DefaultVolume = 11;
+            await File.WriteAllTextAsync(
+                paths.ConfigBackupPath,
+                JsonSerializer.Serialize(newer));
+            var service = new SettingsService(paths);
+
+            var result = await service.LoadAsync();
+
+            Assert.True(result.IsSuccess);
+            Assert.Equal(80, service.Current.Player.DefaultVolume);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
     private static string CreateRoot()
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

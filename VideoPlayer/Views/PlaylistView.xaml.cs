@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 
 using VideoPlayer.ViewModels;
 
@@ -27,7 +28,33 @@ public partial class PlaylistView : UserControl
         if (e.Data.GetData(DataFormats.FileDrop) is string[] paths &&
             DataContext is PlaylistViewModel viewModel)
         {
-            await viewModel.AddPathsAsync(paths);
+            await viewModel.AddPathsAsync(paths, recursive: true);
+        }
+    }
+
+    private void OnPlaylistDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (DataContext is PlaylistViewModel viewModel)
+        {
+            viewModel.RequestPlay(viewModel.SelectedItem);
+        }
+    }
+
+    private async void OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Delete || DataContext is not PlaylistViewModel viewModel)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        try
+        {
+            await viewModel.RemoveAsync(viewModel.SelectedItem);
+        }
+        catch (Exception exception)
+        {
+            Serilog.Log.Warning(exception, "Failed to remove playlist item.");
         }
     }
 }

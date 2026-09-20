@@ -32,4 +32,6 @@ public interface IPlaylistService
     ServiceResult<PlaylistItem> GetPrevious(bool wrap = false);
 
     ServiceResult SetCurrent(string filePath);
+
+    void NotifyCurrentItemChanged();
 }

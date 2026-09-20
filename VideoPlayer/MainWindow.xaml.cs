@@ -3,6 +3,9 @@ using System.Windows;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using Microsoft.Win32;
+using Serilog;
+using VideoPlayer.Enums;
+using VideoPlayer.Models;
 using VideoPlayer.Services;
 using VideoPlayer.ViewModels;
 using VideoPlayer.Views;
@@ -17,14 +20,21 @@ public partial class MainWindow : Window
     private bool _allowClose;
     private bool _viewDisposed;
     private bool _isPlaylistVisible = true;
+    private bool _playlistVisibleBeforeFullscreen = true;
 
     public MainWindow(MainViewModel viewModel)
     {
         InitializeComponent();
         _viewModel = viewModel;
-        _fullscreenController = new FullscreenController(this);
+        _fullscreenController = new FullscreenController(this, OnFullscreenChanged);
         DataContext = viewModel;
         PreviewKeyDown += MainWindow_PreviewKeyDown;
+        AllowDrop = true;
+        PreviewDragOver += MainWindow_PreviewDragOver;
+        PreviewDrop += MainWindow_PreviewDrop;
+        _viewModel.Playlist.PlayRequested += Playlist_PlayRequested;
+        ApplyPlaylistVisibility(_viewModel.Settings.Current.UI.ShowPlaylist);
+        ApplyTheme(_viewModel.Settings.Current.UI.Theme);
     }
 
     protected override async void OnClosing(CancelEventArgs e)
@@ -61,6 +71,9 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         PreviewKeyDown -= MainWindow_PreviewKeyDown;
+        PreviewDragOver -= MainWindow_PreviewDragOver;
+        PreviewDrop -= MainWindow_PreviewDrop;
+        _viewModel.Playlist.PlayRequested -= Playlist_PlayRequested;
         DisposeView();
         base.OnClosed(e);
     }
@@ -95,6 +108,12 @@ public partial class MainWindow : Window
         {
             case ShortcutAction.TogglePlayPause:
                 await _viewModel.Player.TogglePlayPauseAsync();
+                break;
+            case ShortcutAction.Previous:
+                await _viewModel.Player.PreviousAsync();
+                break;
+            case ShortcutAction.Next:
+                await _viewModel.Player.NextAsync();
                 break;
             case ShortcutAction.SeekBackward5:
                 await _viewModel.Player.SeekBackward5Async();
@@ -139,7 +158,7 @@ public partial class MainWindow : Window
                 await OpenFolderAsync();
                 break;
             case ShortcutAction.TogglePlaylist:
-                TogglePlaylist();
+                await TogglePlaylistAsync();
                 break;
             case ShortcutAction.VideoInfo:
                 await ShowVideoInfoAsync();
@@ -172,19 +191,132 @@ public partial class MainWindow : Window
 
         if (dialog.ShowDialog(this) == true)
         {
-            await _viewModel.Playlist.AddFolderAsync(dialog.FolderName);
+            await AddPathsAndPlayFirstAsync([dialog.FolderName]);
         }
     }
 
-    private void TogglePlaylist()
+    private async Task TogglePlaylistAsync()
     {
-        _isPlaylistVisible = !_isPlaylistVisible;
-        PlaylistView.Visibility = _isPlaylistVisible
-            ? System.Windows.Visibility.Visible
-            : System.Windows.Visibility.Collapsed;
-        PlaylistColumn.Width = _isPlaylistVisible
+        var visible = !_isPlaylistVisible;
+        ApplyPlaylistVisibility(visible);
+        _viewModel.Settings.Current.UI.ShowPlaylist = visible;
+        await _viewModel.Settings.SaveAsync();
+    }
+
+    private void ApplyPlaylistVisibility(bool visible)
+    {
+        _isPlaylistVisible = visible;
+        PlaylistView.Visibility = visible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        PlaylistColumn.Width = visible
             ? new GridLength(300)
             : new GridLength(0);
+    }
+
+    private void OnFullscreenChanged(bool isFullscreen)
+    {
+        if (isFullscreen)
+        {
+            _playlistVisibleBeforeFullscreen = _isPlaylistVisible;
+            SetPlaylistDisplay(false);
+            return;
+        }
+
+        SetPlaylistDisplay(_playlistVisibleBeforeFullscreen);
+    }
+
+    private void SetPlaylistDisplay(bool visible)
+    {
+        PlaylistView.Visibility = visible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        PlaylistColumn.Width = visible
+            ? new GridLength(300)
+            : new GridLength(0);
+    }
+
+    private static void ApplyTheme(string theme)
+    {
+        var resources = Application.Current?.Resources;
+        if (resources is null)
+        {
+            return;
+        }
+
+        var isDark = string.Equals(theme, "Dark", StringComparison.OrdinalIgnoreCase);
+        resources["BackgroundBrush"] = new System.Windows.Media.SolidColorBrush(
+            isDark ? System.Windows.Media.Color.FromRgb(0x11, 0x11, 0x11)
+                : System.Windows.Media.Colors.Black);
+        resources["SurfaceBrush"] = new System.Windows.Media.SolidColorBrush(
+            isDark ? System.Windows.Media.Color.FromRgb(0x1B, 0x1B, 0x1B)
+                : System.Windows.Media.Color.FromRgb(0x12, 0x12, 0x12));
+        resources["PrimaryTextBrush"] = new System.Windows.Media.SolidColorBrush(
+            System.Windows.Media.Colors.White);
+    }
+
+    private void MainWindow_PreviewDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop)
+            ? DragDropEffects.Copy
+            : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void MainWindow_PreviewDrop(object sender, DragEventArgs e)
+    {
+        try
+        {
+            if (e.Data.GetData(DataFormats.FileDrop) is not string[] paths
+                || paths.Length == 0)
+            {
+                return;
+            }
+
+            e.Handled = true;
+            await AddPathsAndPlayFirstAsync(paths);
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "Failed to process dropped media.");
+        }
+    }
+
+    private async Task AddPathsAndPlayFirstAsync(IEnumerable<string> paths)
+    {
+        var wasEmpty = _viewModel.Playlist.Items.Count == 0;
+        var result = await _viewModel.Playlist.AddPathsAsync(
+            paths,
+            recursive: true);
+        if (!result.IsSuccess || result.Value is not { Count: > 0 } added)
+        {
+            return;
+        }
+
+        var state = _viewModel.Player.PlaybackState;
+        if (wasEmpty
+            || state is PlaybackState.None
+                or PlaybackState.Stopped
+                or PlaybackState.Ended
+                or PlaybackState.Error)
+        {
+            await _viewModel.Player.OpenAsync(added[0].FilePath);
+        }
+    }
+
+    private async void Playlist_PlayRequested(object? sender, PlaylistItem? item)
+    {
+        try
+        {
+            if (item is not null)
+            {
+                await _viewModel.Player.OpenAsync(item.FilePath);
+            }
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "Failed to open selected playlist item.");
+        }
     }
 
     private async Task ShowVideoInfoAsync()

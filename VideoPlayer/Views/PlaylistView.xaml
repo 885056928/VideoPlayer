@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              AllowDrop="True"
              Drop="OnDrop"
+             PreviewKeyDown="OnPreviewKeyDown"
              DragOver="OnDragOver">
     <Grid Background="{DynamicResource BackgroundBrush}">
         <Grid.RowDefinitions>
@@ -17,6 +18,8 @@
                    FontWeight="SemiBold" />
         <Grid Grid.Row="1">
             <ListBox ItemsSource="{Binding Items}"
+                     SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                     MouseDoubleClick="OnPlaylistDoubleClick"
                      Background="Transparent"
                      Foreground="{DynamicResource PrimaryTextBrush}"
                      BorderThickness="0"
@@ -27,7 +30,34 @@
                      ScrollViewer.CanContentScroll="True">
                 <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <TextBlock Text="{Binding FileName}" Padding="8,4" />
+                        <StackPanel Orientation="Horizontal" Margin="4,2">
+                            <TextBlock Text="▶"
+                                       Margin="4,0"
+                                       Foreground="{DynamicResource AccentBrush}">
+                                <TextBlock.Style>
+                                    <Style TargetType="{x:Type TextBlock}">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Text="{Binding FileName}" Padding="2,2">
+                                <TextBlock.Style>
+                                    <Style TargetType="{x:Type TextBlock}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                                <Setter Property="FontWeight" Value="SemiBold" />
+                                                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>
@@ -48,9 +78,12 @@
                 </TextBlock.Style>
             </TextBlock>
         </Grid>
-        <Button Grid.Row="2"
-                Content="清空"
-                Command="{Binding ClearCommand}"
-                Margin="10" />
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="10">
+            <Button Content="删除"
+                    Command="{Binding RemoveCommand}"
+                    CommandParameter="{Binding SelectedItem}"
+                    Margin="0,0,8,0" />
+            <Button Content="清空" Command="{Binding ClearCommand}" />
+        </StackPanel>
     </Grid>
 </UserControl>

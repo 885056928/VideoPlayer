@@ -182,6 +182,62 @@ public sealed class PlaylistViewModelTests
         Assert.Equal(service.PlaylistChangedCount, dispatcher.PostCount);
     }
 
+    [Fact]
+    public void TenThousandItemProjection_UsesBulkResetInsteadOfIndividualAdds()
+    {
+        var service = new FakePlaylistService();
+        var viewModel = new PlaylistViewModel(service, new ImmediateUiDispatcher());
+        service.SetItems(Enumerable.Range(0, 10_000)
+            .Select(index => new PlaylistItem { FilePath = $"video-{index:D5}.mp4" }));
+        var resets = 0;
+        var adds = 0;
+        viewModel.Items.CollectionChanged += (_, args) =>
+        {
+            if (args.Action == NotifyCollectionChangedAction.Reset)
+            {
+                resets++;
+            }
+            else if (args.Action == NotifyCollectionChangedAction.Add)
+            {
+                adds++;
+            }
+        };
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        service.RaisePlaylistChanged();
+        stopwatch.Stop();
+
+        Assert.Equal(10_000, viewModel.Items.Count);
+        Assert.Equal(1, resets);
+        Assert.Equal(0, adds);
+        Assert.True(
+            stopwatch.Elapsed < TimeSpan.FromSeconds(2),
+            $"10k projection took {stopwatch.Elapsed.TotalSeconds:F3} seconds.");
+    }
+
+    [Fact]
+    public async Task AddPathsAsync_MarksFirstItemCurrent()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var file = Path.Combine(root, "movie.mp4");
+            File.WriteAllText(file, string.Empty);
+            var service = new PlaylistService(new FileService());
+            var viewModel = new PlaylistViewModel(service, new ImmediateUiDispatcher());
+
+            await viewModel.AddPathsAsync([file]);
+
+            Assert.True(viewModel.Items[0].IsCurrent);
+            Assert.Equal(0, service.CurrentIndex);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
     private sealed class ImmediateUiDispatcher : IUiDispatcher
     {
         public int PostCount { get; private set; }
@@ -333,6 +389,10 @@ public sealed class PlaylistViewModelTests
         public ServiceResult SetCurrent(string filePath)
         {
             return ServiceResult.Success();
+        }
+
+        public void NotifyCurrentItemChanged()
+        {
         }
 
         public void SetItems(IEnumerable<PlaylistItem> items)

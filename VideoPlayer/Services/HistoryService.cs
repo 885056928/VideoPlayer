@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO;
 using Microsoft.EntityFrameworkCore;
 using VideoPlayer.Database;
@@ -10,15 +11,25 @@ namespace VideoPlayer.Services;
 
 public sealed class HistoryService : IHistoryService
 {
+    private static readonly TimeSpan DatabaseTimeout = TimeSpan.FromSeconds(2);
     private readonly IDbContextFactory<VideoPlayerDbContext> _contextFactory;
     private readonly SemaphoreSlim _writeGate = new(1, 1);
+    private readonly ConcurrentDictionary<string, long> _latestSessionByPath =
+        new(StringComparer.Ordinal);
 
     public HistoryService(IDbContextFactory<VideoPlayerDbContext> contextFactory)
     {
         _contextFactory = contextFactory;
     }
 
-    public bool IsAvailable { get; private set; } = true;
+    private volatile bool _isAvailable = true;
+
+    public bool IsAvailable => _isAvailable;
+
+    public void SetAvailable(bool isAvailable)
+    {
+        _isAvailable = isAvailable;
+    }
 
     public async Task<ServiceResult<ResumeInfo?>> GetResumeInfoAsync(
         string filePath,
@@ -32,9 +43,12 @@ public sealed class HistoryService : IHistoryService
         try
         {
             var key = PathHelper.CreatePathKey(filePath);
-            await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(DatabaseTimeout);
+            var token = timeoutCts.Token;
+            await using var context = await _contextFactory.CreateDbContextAsync(token);
             var row = await context.PlaybackHistory.AsNoTracking()
-                .SingleOrDefaultAsync(x => x.PathKey == key, cancellationToken);
+                .SingleOrDefaultAsync(x => x.PathKey == key, token);
             return ServiceResult<ResumeInfo?>.Success(row is null ? null : new ResumeInfo(
                 row.FilePath,
                 TimeSpan.FromTicks(row.DurationTicks),
@@ -43,6 +57,15 @@ public sealed class HistoryService : IHistoryService
                 row.LastPlayedAtUtc,
                 row.PlayCount));
         }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            _isAvailable = false;
+            return ServiceResult<ResumeInfo?>.Failure(
+                ErrorCode.DatabaseUnavailable,
+                "播放历史查询超时。",
+                filePath,
+                exception);
+        }
         catch (OperationCanceledException exception)
         {
             return ServiceResult<ResumeInfo?>.Failure(
@@ -50,7 +73,7 @@ public sealed class HistoryService : IHistoryService
         }
         catch (Exception exception)
         {
-            IsAvailable = false;
+            _isAvailable = false;
             return ServiceResult<ResumeInfo?>.Failure(
                 ErrorCode.DatabaseUnavailable, "播放历史不可用。", filePath, exception);
         }
@@ -60,8 +83,9 @@ public sealed class HistoryService : IHistoryService
         string filePath,
         string fileName,
         TimeSpan duration,
+        long mediaSessionId = 0,
         CancellationToken cancellationToken = default)
-        => UpsertAsync(filePath, row =>
+        => UpsertAsync(filePath, fileName, mediaSessionId, row =>
         {
             row.DurationTicks = duration.Ticks;
             row.LastPlayedAtUtc = DateTimeOffset.UtcNow;
@@ -78,19 +102,23 @@ public sealed class HistoryService : IHistoryService
             return Task.FromResult(ServiceResult.Success());
         }
 
-        return UpsertAsync(snapshot.MediaPath, row =>
+        var completed = snapshot.Duration > TimeSpan.Zero
+            && snapshot.Position >= snapshot.Duration * 0.95;
+        return UpsertAsync(snapshot.MediaPath, null, snapshot.MediaSessionId, row =>
         {
             row.DurationTicks = snapshot.Duration.Ticks;
-            row.LastPositionTicks = snapshot.Position.Ticks;
+            row.LastPositionTicks = completed ? 0 : snapshot.Position.Ticks;
             row.LastPlayedAtUtc = DateTimeOffset.UtcNow;
+            row.IsCompleted = completed;
         }, cancellationToken);
     }
 
     public Task<ServiceResult> MarkCompletedAsync(
         string filePath,
         TimeSpan duration,
+        long mediaSessionId = 0,
         CancellationToken cancellationToken = default)
-        => UpsertAsync(filePath, row =>
+        => UpsertAsync(filePath, null, mediaSessionId, row =>
         {
             row.DurationTicks = duration.Ticks;
             row.LastPositionTicks = 0;
@@ -100,8 +128,9 @@ public sealed class HistoryService : IHistoryService
 
     public Task<ServiceResult> ClearCompletedAsync(
         string filePath,
+        long mediaSessionId = 0,
         CancellationToken cancellationToken = default)
-        => UpsertAsync(filePath, row =>
+        => UpsertAsync(filePath, null, mediaSessionId, row =>
         {
             row.LastPositionTicks = 0;
             row.IsCompleted = false;
@@ -112,6 +141,8 @@ public sealed class HistoryService : IHistoryService
 
     private async Task<ServiceResult> UpsertAsync(
         string filePath,
+        string? fileName,
+        long mediaSessionId,
         Action<PlaybackHistory> update,
         CancellationToken cancellationToken)
     {
@@ -128,23 +159,42 @@ public sealed class HistoryService : IHistoryService
             gateAcquired = true;
             var normalized = PathHelper.NormalizePath(filePath);
             var key = PathHelper.CreatePathKey(normalized);
-            await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+            if (!IsLatestSession(key, mediaSessionId))
+            {
+                return ServiceResult.Success();
+            }
+
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(DatabaseTimeout);
+            var token = timeoutCts.Token;
+            await using var context = await _contextFactory.CreateDbContextAsync(token);
             var row = await context.PlaybackHistory
-                .SingleOrDefaultAsync(x => x.PathKey == key, cancellationToken);
+                .SingleOrDefaultAsync(x => x.PathKey == key, token);
             if (row is null)
             {
                 row = new PlaybackHistory
                 {
                     FilePath = normalized,
                     PathKey = key,
-                    FileName = Path.GetFileName(normalized)
+                    FileName = string.IsNullOrWhiteSpace(fileName)
+                        ? Path.GetFileName(normalized)
+                        : fileName
                 };
                 context.PlaybackHistory.Add(row);
             }
 
             update(row);
-            await context.SaveChangesAsync(cancellationToken);
+            await context.SaveChangesAsync(token);
             return ServiceResult.Success();
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            _isAvailable = false;
+            return ServiceResult.Failure(
+                ErrorCode.DatabaseUnavailable,
+                "播放历史保存超时。",
+                filePath,
+                exception);
         }
         catch (OperationCanceledException exception)
         {
@@ -153,7 +203,7 @@ public sealed class HistoryService : IHistoryService
         }
         catch (Exception exception)
         {
-            IsAvailable = false;
+            _isAvailable = false;
             return ServiceResult.Failure(
                 ErrorCode.DatabaseUnavailable, "播放历史保存失败。", filePath, exception);
         }
@@ -162,6 +212,38 @@ public sealed class HistoryService : IHistoryService
             if (gateAcquired)
             {
                 _writeGate.Release();
+            }
+        }
+    }
+
+    private bool IsLatestSession(string pathKey, long mediaSessionId)
+    {
+        if (mediaSessionId <= 0)
+        {
+            return true;
+        }
+
+        while (true)
+        {
+            if (_latestSessionByPath.TryGetValue(pathKey, out var latestSessionId))
+            {
+                if (mediaSessionId < latestSessionId)
+                {
+                    return false;
+                }
+
+                if (mediaSessionId == latestSessionId ||
+                    _latestSessionByPath.TryUpdate(
+                        pathKey,
+                        mediaSessionId,
+                        latestSessionId))
+                {
+                    return true;
+                }
+            }
+            else if (_latestSessionByPath.TryAdd(pathKey, mediaSessionId))
+            {
+                return true;
             }
         }
     }

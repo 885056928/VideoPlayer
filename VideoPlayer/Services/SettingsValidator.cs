@@ -14,7 +14,7 @@ public static class SettingsValidator
     public static AppSettings Normalize(AppSettings? settings)
     {
         settings ??= AppSettings.CreateDefault();
-        settings.SchemaVersion = 1;
+        settings.SchemaVersion = AppSettings.CurrentSchemaVersion;
         settings.Player ??= new PlayerSettings();
         settings.Subtitle ??= new SubtitleSettings();
         settings.UI ??= new UiSettings();

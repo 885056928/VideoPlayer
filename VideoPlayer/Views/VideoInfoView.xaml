@@ -13,6 +13,10 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <TextBlock Text="文件名" Foreground="#AAAAAA" />
         <TextBlock Grid.Column="1" Text="{Binding FileName}" Foreground="White" />
@@ -26,5 +30,13 @@
         <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding AudioCodec}" Foreground="White" />
         <TextBlock Grid.Row="5" Text="时长" Foreground="#AAAAAA" />
         <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Duration}" Foreground="White" />
+        <TextBlock Grid.Row="6" Text="文件大小" Foreground="#AAAAAA" />
+        <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding FileSize}" Foreground="White" />
+        <TextBlock Grid.Row="7" Text="帧率" Foreground="#AAAAAA" />
+        <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding FrameRate}" Foreground="White" />
+        <TextBlock Grid.Row="8" Text="采样率" Foreground="#AAAAAA" />
+        <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding SampleRate}" Foreground="White" />
+        <TextBlock Grid.Row="9" Text="声道数" Foreground="#AAAAAA" />
+        <TextBlock Grid.Row="9" Grid.Column="1" Text="{Binding Channels}" Foreground="White" />
     </Grid>
 </UserControl>

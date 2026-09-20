@@ -112,6 +112,32 @@ public sealed class FileServiceTests
         Assert.Equal(ErrorCode.FileNotFound, result.ErrorCode);
     }
 
+    [Fact]
+    public async Task EnumerateVideosAsync_RecursiveScan_ReturnsPartialResultsWhenChildFolderIsLocked()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var locked = Path.Combine(root, "locked");
+        Directory.CreateDirectory(locked);
+        try
+        {
+            var visible = Path.Combine(root, "visible.mp4");
+            File.WriteAllText(visible, string.Empty);
+            var service = new FileService((folder, _) =>
+                string.Equals(folder, locked, StringComparison.OrdinalIgnoreCase)
+                    ? throw new UnauthorizedAccessException("Access denied.")
+                    : Directory.EnumerateFiles(folder, "*", SearchOption.TopDirectoryOnly));
+
+            var result = await service.EnumerateVideosAsync(root, recursive: true);
+
+            Assert.True(result.IsSuccess, result.TechnicalMessage);
+            Assert.Contains(result.Value!, path => string.Equals(path, visible, StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
     private static IEnumerable<string> EnumerateAndCancel(
         string first,
         string second,

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using VideoPlayer.Enums;
 using VideoPlayer.Interfaces;
 using VideoPlayer.Models;
@@ -13,51 +14,75 @@ public sealed class PlayerViewModelHistoryTests
     [Fact]
     public async Task OpenAsync_WhenUserContinues_StartsAtSavedPosition()
     {
-        var history = new FakeHistoryService
+        var mediaPath = CreateTempMediaFile();
+        try
         {
-            ResumeInfoResult = ServiceResult<ResumeInfo?>.Success(CreateResumeInfo(50))
-        };
-        var dialog = new FakeDialogService { Choice = ResumeChoice.Continue };
-        var player = new FakePlayerService();
-        await using var viewModel = CreateViewModel(player, history, dialog);
+            var history = new FakeHistoryService
+            {
+                ResumeInfoResult = ServiceResult<ResumeInfo?>.Success(CreateResumeInfo(50))
+            };
+            var dialog = new FakeDialogService { Choice = ResumeChoice.Continue };
+            var player = new FakePlayerService();
+            await using var viewModel = CreateViewModel(player, history, dialog);
 
-        await viewModel.OpenAsync(@"C:\Videos\movie.mp4");
+            await viewModel.OpenAsync(mediaPath);
 
-        Assert.Equal(TimeSpan.FromSeconds(50), player.LastRequest!.StartPosition);
-        Assert.Equal(1, dialog.CallCount);
+            Assert.Equal(TimeSpan.FromSeconds(50), player.LastRequest!.StartPosition);
+            Assert.Equal(1, dialog.CallCount);
+        }
+        finally
+        {
+            File.Delete(mediaPath);
+        }
     }
 
     [Fact]
     public async Task OpenAsync_WhenUserRestarts_ClearsHistoryAndStartsAtZero()
     {
-        var history = new FakeHistoryService
+        var mediaPath = CreateTempMediaFile();
+        try
         {
-            ResumeInfoResult = ServiceResult<ResumeInfo?>.Success(CreateResumeInfo(50))
-        };
-        var dialog = new FakeDialogService { Choice = ResumeChoice.Restart };
-        var player = new FakePlayerService();
-        await using var viewModel = CreateViewModel(player, history, dialog);
+            var history = new FakeHistoryService
+            {
+                ResumeInfoResult = ServiceResult<ResumeInfo?>.Success(CreateResumeInfo(50))
+            };
+            var dialog = new FakeDialogService { Choice = ResumeChoice.Restart };
+            var player = new FakePlayerService();
+            await using var viewModel = CreateViewModel(player, history, dialog);
 
-        await viewModel.OpenAsync(@"C:\Videos\movie.mp4");
+            await viewModel.OpenAsync(mediaPath);
 
-        Assert.Equal(TimeSpan.Zero, player.LastRequest!.StartPosition);
-        Assert.Equal(1, history.ClearCompletedCallCount);
+            Assert.Equal(TimeSpan.Zero, player.LastRequest!.StartPosition);
+            Assert.Equal(1, history.ClearCompletedCallCount);
+        }
+        finally
+        {
+            File.Delete(mediaPath);
+        }
     }
 
     [Fact]
     public async Task OpenAsync_WhenUserCancels_DoesNotOpenMedia()
     {
-        var history = new FakeHistoryService
+        var mediaPath = CreateTempMediaFile();
+        try
         {
-            ResumeInfoResult = ServiceResult<ResumeInfo?>.Success(CreateResumeInfo(50))
-        };
-        var dialog = new FakeDialogService { Choice = ResumeChoice.Cancel };
-        var player = new FakePlayerService();
-        await using var viewModel = CreateViewModel(player, history, dialog);
+            var history = new FakeHistoryService
+            {
+                ResumeInfoResult = ServiceResult<ResumeInfo?>.Success(CreateResumeInfo(50))
+            };
+            var dialog = new FakeDialogService { Choice = ResumeChoice.Cancel };
+            var player = new FakePlayerService();
+            await using var viewModel = CreateViewModel(player, history, dialog);
 
-        await viewModel.OpenAsync(@"C:\Videos\movie.mp4");
+            await viewModel.OpenAsync(mediaPath);
 
-        Assert.Equal(0, player.OpenCount);
+            Assert.Equal(0, player.OpenCount);
+        }
+        finally
+        {
+            File.Delete(mediaPath);
+        }
     }
 
     [Fact]
@@ -255,9 +280,20 @@ public sealed class PlayerViewModelHistoryTests
         }
     }
 
+    private static string CreateTempMediaFile()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".mp4");
+        File.WriteAllBytes(path, []);
+        return path;
+    }
     private sealed class FakeHistoryService : IHistoryService
     {
-        public bool IsAvailable => true;
+        public bool IsAvailable { get; private set; } = true;
+
+        public void SetAvailable(bool isAvailable)
+        {
+            IsAvailable = isAvailable;
+        }
 
         public ServiceResult<ResumeInfo?> ResumeInfoResult { get; set; } =
             ServiceResult<ResumeInfo?>.Success(null);
@@ -280,6 +316,7 @@ public sealed class PlayerViewModelHistoryTests
             string filePath,
             string fileName,
             TimeSpan duration,
+            long mediaSessionId = 0,
             CancellationToken cancellationToken = default)
         {
             StartPlaybackCallCount++;
@@ -303,11 +340,13 @@ public sealed class PlayerViewModelHistoryTests
         public Task<ServiceResult> MarkCompletedAsync(
             string filePath,
             TimeSpan duration,
+            long mediaSessionId = 0,
             CancellationToken cancellationToken = default)
             => Task.FromResult(ServiceResult.Success());
 
         public Task<ServiceResult> ClearCompletedAsync(
             string filePath,
+            long mediaSessionId = 0,
             CancellationToken cancellationToken = default)
         {
             ClearCompletedCallCount++;
@@ -336,6 +375,18 @@ public sealed class PlayerViewModelHistoryTests
             CallCount++;
             return Task.FromResult(Choice);
         }
+
+        public Task ShowErrorAsync(
+            string title,
+            string message,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task ShowInformationAsync(
+            string title,
+            string message,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
     private sealed class FakeSettingsService : ISettingsService

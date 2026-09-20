@@ -6,6 +6,8 @@ public enum ShortcutAction
 {
     None,
     TogglePlayPause,
+    Previous,
+    Next,
     SeekBackward5,
     SeekForward5,
     SeekBackward30,
@@ -34,6 +36,8 @@ public static class ShortcutService
             Key.F11 when modifiers == ModifierKeys.None => ShortcutAction.ToggleFullscreen,
             Key.Escape when modifiers == ModifierKeys.None => ShortcutAction.ExitFullscreen,
             Key.Space when modifiers == ModifierKeys.None => ShortcutAction.TogglePlayPause,
+            Key.Left when modifiers == ModifierKeys.Control => ShortcutAction.Previous,
+            Key.Right when modifiers == ModifierKeys.Control => ShortcutAction.Next,
             Key.Left when modifiers == ModifierKeys.None => ShortcutAction.SeekBackward5,
             Key.Left when modifiers == ModifierKeys.Shift => ShortcutAction.SeekBackward30,
             Key.Right when modifiers == ModifierKeys.None => ShortcutAction.SeekForward5,

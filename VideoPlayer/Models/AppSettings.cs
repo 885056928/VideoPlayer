@@ -2,7 +2,9 @@ namespace VideoPlayer.Models;
 
 public sealed class AppSettings
 {
-    public int SchemaVersion { get; set; } = 1;
+    public const int CurrentSchemaVersion = 1;
+
+    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
 
     public PlayerSettings Player { get; set; } = new();
 

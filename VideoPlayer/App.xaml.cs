@@ -19,6 +19,12 @@ public partial class App : Application
     private ServiceProvider? _services;
     private Task? _shutdownTask;
 
+    public App()
+    {
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+    }
     protected override async void OnStartup(StartupEventArgs e)
     {
         try
@@ -77,9 +83,12 @@ public partial class App : Application
     {
         try
         {
-            var result = await _services!
+            var services = _services!;
+            var history = services.GetRequiredService<IHistoryService>();
+            var result = await services
                 .GetRequiredService<DatabaseInitializer>()
                 .InitializeAsync();
+            history.SetAvailable(result.IsSuccess);
             if (!result.IsSuccess)
             {
                 Log.Warning(
@@ -90,6 +99,7 @@ public partial class App : Application
         }
         catch (Exception exception)
         {
+            _services?.GetService<IHistoryService>()?.SetAvailable(false);
             Log.Warning(exception, "Playback history database initialization failed.");
         }
     }
@@ -117,6 +127,68 @@ public partial class App : Application
         }
 
         CloseLoggerSafely();
+    }
+
+    private static void OnDispatcherUnhandledException(
+        object sender,
+        System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    {
+        try
+        {
+            Log.Error(e.Exception, "Unhandled UI exception.");
+        }
+        catch
+        {
+        }
+
+        e.Handled = true;
+        ShowUnhandledErrorSafely();
+    }
+
+    private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        try
+        {
+            if (e.ExceptionObject is Exception exception)
+            {
+                Log.Fatal(exception, "Unhandled application exception.");
+            }
+            else
+            {
+                Log.Fatal("Unhandled application exception: {ExceptionObject}", e.ExceptionObject);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        try
+        {
+            Log.Error(e.Exception, "Unobserved task exception.");
+        }
+        catch
+        {
+        }
+
+        e.SetObserved();
+    }
+
+    private static void ShowUnhandledErrorSafely()
+    {
+        try
+        {
+            MessageBox.Show(
+                "发生未处理错误，操作已中止。详细信息已写入日志。",
+                "VideoPlayer",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        catch
+        {
+        }
     }
 
     private static void CloseLoggerSafely()

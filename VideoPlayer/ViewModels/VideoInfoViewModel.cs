@@ -59,7 +59,7 @@ public sealed partial class VideoInfoViewModel : ObservableObject
 
         var result = await _mediaInfoService
             .GetCurrentMediaInfoAsync(snapshot, tracks, cancellationToken)
-            .ConfigureAwait(false);
+;
         if (!result.IsSuccess || result.Value is null)
         {
             ApplyUnknown();

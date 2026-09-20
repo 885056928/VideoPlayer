@@ -134,11 +134,28 @@
                         VerticalAlignment="Bottom"
                         Background="#D91B1B1B"
                         Padding="8">
-                    <StackPanel Orientation="Horizontal">
+                    <WrapPanel Orientation="Horizontal">
                         <Button Content="打开" Click="Open_Click" Margin="4" />
                         <Button Content="播放" Command="{Binding PlayCommand}" Margin="4" />
                         <Button Content="暂停" Command="{Binding PauseCommand}" Margin="4" />
                         <Button Content="停止" Command="{Binding StopCommand}" Margin="4" />
+                        <Button Content="上一项" Command="{Binding PreviousCommand}" Margin="4" />
+                        <Button Content="下一项" Command="{Binding NextCommand}" Margin="4" />
+                        <ComboBox Width="110"
+                                  Margin="4"
+                                  ItemsSource="{Binding AudioTracks}"
+                                  SelectedItem="{Binding SelectedAudioTrack, Mode=TwoWay}"
+                                  DisplayMemberPath="Name"
+                                  ToolTip="音轨" />
+                        <ComboBox Width="110"
+                                  Margin="4"
+                                  ItemsSource="{Binding SubtitleTracks}"
+                                  SelectedItem="{Binding SelectedSubtitleTrack, Mode=TwoWay}"
+                                  DisplayMemberPath="Name"
+                                  ToolTip="字幕轨" />
+                        <Button Content="关闭字幕" Command="{Binding CloseSubtitleCommand}" Margin="4" />
+                        <Button Content="添加字幕" Click="AddSubtitle_Click" Margin="4" />
+                        <Button Content="截图" Command="{Binding ScreenshotCommand}" Margin="4" />
                         <Slider x:Name="SeekSlider"
                                 Width="220"
                                 Minimum="0"
@@ -162,7 +179,7 @@
                         <TextBlock Text="{Binding Rate, StringFormat={}{0:0.00}x}"
                                    Foreground="{DynamicResource PrimaryTextBrush}"
                                    VerticalAlignment="Center" />
-                    </StackPanel>
+                    </WrapPanel>
                 </Border>
             </Grid>
         </vlc:VideoView>

@@ -1,5 +1,7 @@
 using System.IO;
 
+using Serilog;
+
 using VideoPlayer.Enums;
 using VideoPlayer.Helpers;
 using VideoPlayer.Interfaces;
@@ -48,24 +50,21 @@ public sealed class FileService : IFileService
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-
-                var option = recursive
-                    ? SearchOption.AllDirectories
-                    : SearchOption.TopDirectoryOnly;
-
                 var paths = new List<string>();
-                foreach (var path in _enumerateFiles(folderPath, option))
+                if (recursive)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    if (IsSupportedVideo(path))
+                    EnumerateRecursive(folderPath, paths, cancellationToken);
+                }
+                else
+                {
+                    foreach (var path in _enumerateFiles(folderPath, SearchOption.TopDirectoryOnly))
                     {
-                        paths.Add(PathHelper.NormalizePath(path));
+                        cancellationToken.ThrowIfCancellationRequested();
+                        AddSupportedPath(path, paths);
                     }
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
-
                 IReadOnlyList<string> sortedPaths = paths
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(path => path, Comparer<string>.Create(PathHelper.NaturalCompare))
@@ -106,5 +105,58 @@ public sealed class FileService : IFileService
                     exception);
             }
         }, CancellationToken.None);
+    }
+
+    private void EnumerateRecursive(
+        string root,
+        List<string> paths,
+        CancellationToken cancellationToken)
+    {
+        var pending = new Queue<string>();
+        pending.Enqueue(root);
+        var isRoot = true;
+        while (pending.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var directory = pending.Dequeue();
+            try
+            {
+                foreach (var file in _enumerateFiles(directory, SearchOption.TopDirectoryOnly))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    AddSupportedPath(file, paths);
+                }
+
+                foreach (var child in Directory.EnumerateDirectories(directory))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    pending.Enqueue(child);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception) when (!isRoot
+                && exception is UnauthorizedAccessException
+                    or IOException
+                    or DirectoryNotFoundException)
+            {
+                Log.Warning(
+                    exception,
+                    "Skipping inaccessible or locked folder {Folder}.",
+                    directory);
+            }
+
+            isRoot = false;
+        }
+    }
+
+    private void AddSupportedPath(string path, List<string> paths)
+    {
+        if (IsSupportedVideo(path))
+        {
+            paths.Add(PathHelper.NormalizePath(path));
+        }
     }
 }

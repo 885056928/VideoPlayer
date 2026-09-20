@@ -56,6 +56,7 @@ public sealed class FakePlayerService : IPlayerService
     public ServiceResult SelectSubtitleTrackResult { get; set; } = ServiceResult.Success();
     public ServiceResult AddExternalSubtitleResult { get; set; } = ServiceResult.Success();
     public ServiceResult TakeSnapshotResult { get; set; } = ServiceResult.Success();
+    public Func<string, CancellationToken, Task<ServiceResult>>? TakeSnapshotHandler { get; set; }
     public int TakeSnapshotCallCount { get; private set; }
     public string? LastSnapshotPath { get; private set; }
     public int LastSelectedAudioTrackId { get; private set; }
@@ -98,16 +99,20 @@ public sealed class FakePlayerService : IPlayerService
         remove { }
     }
 
+    private EventHandler<MediaParsedEventArgs>? _mediaParsed;
+
     public event EventHandler<MediaParsedEventArgs>? MediaParsed
     {
-        add { }
-        remove { }
+        add => _mediaParsed += value;
+        remove => _mediaParsed -= value;
     }
     public event EventHandler<TracksChangedEventArgs>? TracksChanged;
+    private EventHandler<PlaybackFailedEventArgs>? _playbackFailed;
+
     public event EventHandler<PlaybackFailedEventArgs>? PlaybackFailed
     {
-        add { }
-        remove { }
+        add => _playbackFailed += value;
+        remove => _playbackFailed -= value;
     }
 
     public event EventHandler<EndReachedEventArgs>? EndReached
@@ -160,7 +165,15 @@ public sealed class FakePlayerService : IPlayerService
     public Task<ServiceResult<IReadOnlyList<PlayerTrackInfo>>> GetTracksAsync(
         PlayerTrackType type,
         CancellationToken cancellationToken = default)
-        => Task.FromResult(TracksResult);
+    {
+        if (!TracksResult.IsSuccess || TracksResult.Value is null)
+        {
+            return Task.FromResult(TracksResult);
+        }
+
+        return Task.FromResult(ServiceResult<IReadOnlyList<PlayerTrackInfo>>.Success(
+            TracksResult.Value.Where(track => track.Type == type).ToArray()));
+    }
 
     public Task<ServiceResult> SelectAudioTrackAsync(
         int trackId,
@@ -189,6 +202,34 @@ public sealed class FakePlayerService : IPlayerService
         return Task.FromResult(AddExternalSubtitleResult);
     }
 
+    public void RaiseMediaParsed(TimeSpan duration, params PlayerTrackInfo[] tracks)
+    {
+        _mediaParsed?.Invoke(
+            this,
+            new MediaParsedEventArgs
+            {
+                MediaSessionId = _sessionId,
+                Duration = duration,
+                HasVideo = true,
+                HasAudio = true,
+                Tracks = tracks
+            });
+    }
+
+    public void RaisePlaybackFailed(ErrorCode errorCode, string message)
+    {
+        _playbackFailed?.Invoke(
+            this,
+            new PlaybackFailedEventArgs
+            {
+                MediaSessionId = _sessionId,
+                ErrorCode = errorCode,
+                UserMessage = message,
+                TechnicalMessage = message,
+                Exception = null
+            });
+    }
+
     public void RaiseTracksChanged(params PlayerTrackInfo[] tracks)
     {
         TracksChanged?.Invoke(
@@ -206,6 +247,11 @@ public sealed class FakePlayerService : IPlayerService
     {
         TakeSnapshotCallCount++;
         LastSnapshotPath = outputPath;
+        if (TakeSnapshotHandler is not null)
+        {
+            return TakeSnapshotHandler(outputPath, cancellationToken);
+        }
+
         if (TakeSnapshotResult.IsSuccess)
         {
             var directory = Path.GetDirectoryName(outputPath);
@@ -289,6 +335,11 @@ public sealed class FakePlaylistService : IPlaylistService
 
     public event EventHandler? CurrentChanged;
 
+    public void NotifyCurrentItemChanged()
+    {
+        CurrentChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     public Task<ServiceResult<IReadOnlyList<PlaylistItem>>> AddFilesAsync(
         IEnumerable<string> paths,
         bool recursive,
@@ -357,16 +408,42 @@ public sealed class FakeSettingsService : ISettingsService
 
 public sealed class FakeDialogService : IDialogService
 {
+    public List<string> Errors { get; } = [];
+    public List<string> InformationMessages { get; } = [];
+
     public Task<ResumeChoice> AskResumeAsync(
         string fileName,
         TimeSpan lastPosition,
         CancellationToken cancellationToken = default)
         => Task.FromResult(ResumeChoice.Continue);
+
+    public Task ShowErrorAsync(
+        string title,
+        string message,
+        CancellationToken cancellationToken = default)
+    {
+        Errors.Add(title + ": " + message);
+        return Task.CompletedTask;
+    }
+
+    public Task ShowInformationAsync(
+        string title,
+        string message,
+        CancellationToken cancellationToken = default)
+    {
+        InformationMessages.Add(title + ": " + message);
+        return Task.CompletedTask;
+    }
 }
 
 public sealed class FakeHistoryService : IHistoryService
 {
-    public bool IsAvailable => true;
+    public bool IsAvailable { get; private set; } = true;
+
+    public void SetAvailable(bool isAvailable)
+    {
+        IsAvailable = isAvailable;
+    }
 
     public ServiceResult<ResumeInfo?> ResumeInfoResult { get; set; } =
         ServiceResult<ResumeInfo?>.Success(null);
@@ -388,6 +465,7 @@ public sealed class FakeHistoryService : IHistoryService
         string filePath,
         string fileName,
         TimeSpan duration,
+        long mediaSessionId = 0,
         CancellationToken cancellationToken = default)
     {
         StartPlaybackCallCount++;
@@ -405,11 +483,13 @@ public sealed class FakeHistoryService : IHistoryService
     public Task<ServiceResult> MarkCompletedAsync(
         string filePath,
         TimeSpan duration,
+        long mediaSessionId = 0,
         CancellationToken cancellationToken = default)
         => Task.FromResult(ServiceResult.Success());
 
     public Task<ServiceResult> ClearCompletedAsync(
         string filePath,
+        long mediaSessionId = 0,
         CancellationToken cancellationToken = default)
     {
         ClearCompletedCallCount++;
