@@ -21,4 +21,33 @@ public sealed class PlayerViewLayoutTests
         Assert.Equal(0, Grid.GetRow(videoView));
         Assert.Equal(1, Grid.GetRow(controlBar));
     }
+
+    [StaFact]
+    public void IconButtons_HaveGlyphTooltipAndAutomationName()
+    {
+        var view = new PlayerView();
+        var names = new[]
+        {
+            "OpenButton",
+            "PlayButton",
+            "PauseButton",
+            "StopButton",
+            "PreviousButton",
+            "NextButton",
+            "CloseSubtitleButton",
+            "AddSubtitleButton",
+            "ScreenshotButton",
+            "MuteButton"
+        };
+
+        foreach (var name in names)
+        {
+            var button = Assert.IsType<Button>(view.FindName(name));
+            var glyph = Assert.IsType<string>(button.Content);
+            Assert.False(string.IsNullOrWhiteSpace(glyph));
+            Assert.Contains("Segoe MDL2 Assets", button.FontFamily.Source);
+            Assert.False(string.IsNullOrWhiteSpace(button.ToolTip?.ToString()));
+            Assert.False(string.IsNullOrWhiteSpace(System.Windows.Automation.AutomationProperties.GetName(button)));
+        }
+    }
 }
