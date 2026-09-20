@@ -20,8 +20,8 @@ public sealed class SeekHoverMathTests
     }
 
     [Theory]
-    [InlineData(5.24, 5.0)]
-    [InlineData(5.25, 5.5)]
+    [InlineData(5.09, 5.0)]
+    [InlineData(5.10, 5.2)]
     public void QuantizeForPreview_UsesHalfSecondSteps(double input, double expectedSeconds)
     {
         var actual = SeekHoverMath.QuantizeForPreview(

@@ -383,7 +383,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         var clamped = PlaybackMath.ClampPosition(position, Duration);
         var previewPosition = SeekHoverMath.QuantizeForPreview(clamped, Duration);
         var previewTick = (long)Math.Round(
-            previewPosition.TotalSeconds * 2,
+            previewPosition.TotalSeconds * 5,
             MidpointRounding.AwayFromZero);
         if (previewTick == Interlocked.Read(ref _lastPreviewTick)
             && !string.IsNullOrWhiteSpace(HoverPreviewPath))
@@ -399,7 +399,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await Task.Delay(120, cts.Token).ConfigureAwait(false);
+            await Task.Delay(100, cts.Token).ConfigureAwait(false);
             var previewDirectory = Path.Combine(
                 Path.GetTempPath(),
                 "VideoPlayer",
