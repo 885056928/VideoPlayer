@@ -204,6 +204,17 @@ public sealed class PlayerViewModelFinalReviewTests
         Assert.Equal(dispatcher.UiThreadId, dispatcherThreadId);
     }
 
+    [Fact]
+    public async Task OpenAsync_WhenPlayingEventArrivesBeforeOpenCompletes_TransitionsToPlaying()
+    {
+        var fixture = new PlayerViewModelFixture(sessionId: 68);
+        await using var viewModel = fixture.ViewModel;
+
+        await viewModel.OpenAsync("resume.mp4");
+
+        Assert.Equal(PlaybackState.Playing, viewModel.PlaybackState);
+        Assert.Equal(1, fixture.History.StartPlaybackCallCount);
+    }
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);

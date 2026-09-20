@@ -117,14 +117,58 @@ public sealed class PlayerServiceMediaReplacementTests
         }
     }
 
+    [Fact]
+    public async Task OpenAsync_WithStartPosition_ReachesPlayingAndAppliesPosition()
+    {
+        var mediaPath = CreateMediaFile(frameCount: 300);
+        await using var service = CreateService();
+
+        try
+        {
+            var opened = await service.OpenAsync(CreateRequest(
+                mediaPath,
+                TimeSpan.FromMilliseconds(200)));
+
+            Assert.True(opened.IsSuccess, opened.TechnicalMessage);
+            await WaitForStateAsync(
+                service,
+                opened.Value!.MediaSessionId,
+                PlaybackState.Playing);
+            await WaitForPositionAsync(service, TimeSpan.FromMilliseconds(150));
+
+            Assert.Equal(PlaybackState.Playing, service.Snapshot.State);
+        }
+        finally
+        {
+            File.Delete(mediaPath);
+        }
+    }
+
+    private static async Task WaitForPositionAsync(
+        PlayerService service,
+        TimeSpan minimumPosition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (service.Snapshot.Position >= minimumPosition)
+            {
+                return;
+            }
+
+            await Task.Delay(25);
+        }
+
+        throw new Xunit.Sdk.XunitException("Timed out waiting for the resume position.");
+    }
     private static PlayerService CreateService()
         => new(
             new ImmediateUiDispatcher(),
             new LoggerConfiguration().CreateLogger(),
             ["--vout=dummy", "--aout=dummy", "--no-audio"]);
 
-    private static OpenMediaRequest CreateRequest(string path)
-        => new(path, TimeSpan.Zero, AutoPlay: true, null, null);
+    private static OpenMediaRequest CreateRequest(string path, TimeSpan? startPosition = null)
+        => new(path, startPosition ?? TimeSpan.Zero, AutoPlay: true, null, null);
 
     private static async Task WaitForStateAsync(
         PlayerService service,
@@ -159,11 +203,11 @@ public sealed class PlayerServiceMediaReplacementTests
         }
     }
 
-    private static string CreateMediaFile()
+    private static string CreateMediaFile(int frameCount = 30)
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".mjpeg");
         using var stream = File.Create(path);
-        for (var index = 0; index < 30; index++)
+        for (var index = 0; index < frameCount; index++)
         {
             stream.Write(JpegFrame);
         }

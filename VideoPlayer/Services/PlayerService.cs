@@ -32,8 +32,6 @@ public sealed class PlayerService : IPlayerService
     private Media? _media;
     private string? _mediaPath;
     private long _sessionId;
-    private TimeSpan? _pendingStartPosition;
-    private long _resumeAppliedSessionId = -1;
     private int _disposed;
     private int _volume;
     private bool _isMuted;
@@ -159,16 +157,19 @@ public sealed class PlayerService : IPlayerService
             try
             {
                 newMedia = new Media(_libVlc, new Uri(path));
+                if (request.StartPosition > TimeSpan.Zero)
+                {
+                    newMedia.AddOption(
+                        ":start-time=" + request.StartPosition.TotalSeconds.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture));
+                }
+
                 StopAndResetCurrentSession();
                 UnsubscribeMediaPlayerEvents();
                 _mediaPlayer.Media = null;
                 _media?.Dispose();
                 _media = null;
                 _mediaPath = null;
-                _pendingStartPosition = request.StartPosition > TimeSpan.Zero
-                    ? request.StartPosition
-                    : null;
-                _resumeAppliedSessionId = -1;
                 _externalSubtitlePath = null;
                 _externalSubtitleTrackIds.Clear();
                 _lastTracksSessionId = -1;
@@ -686,26 +687,11 @@ public sealed class PlayerService : IPlayerService
 
         try
         {
-            if (state == PlaybackState.Playing)
-            {
-                ApplyPendingStartPosition(sessionId);
-            }
-
             Transition(state, sessionId);
         }
         catch (Exception exception)
         {
             HandleCallbackFailure(sessionId, exception);
-        }
-    }
-
-    private void ApplyPendingStartPosition(long sessionId)
-    {
-        if (_pendingStartPosition is { } start &&
-            Interlocked.Exchange(ref _resumeAppliedSessionId, sessionId) != sessionId)
-        {
-            _mediaPlayer.Time = (long)start.TotalMilliseconds;
-            _pendingStartPosition = null;
         }
     }
 
