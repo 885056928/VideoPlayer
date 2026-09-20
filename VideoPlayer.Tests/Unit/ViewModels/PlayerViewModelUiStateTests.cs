@@ -1,6 +1,7 @@
 using VideoPlayer.Enums;
 using VideoPlayer.Models;
 using VideoPlayer.Tests.Fakes;
+using VideoPlayer.ViewModels;
 
 using Xunit;
 
@@ -56,6 +57,18 @@ public sealed class PlayerViewModelUiStateTests
         await viewModel.OpenAsync("/tmp/movie.mp4");
 
         Assert.Equal(string.Empty, viewModel.LastError);
+    }
+
+    [Fact]
+    public async Task OpenAsync_UpdatesMediaTitleToFileName()
+    {
+        var fixture = new PlayerViewModelFixture(sessionId: 36);
+        await using var viewModel = fixture.ViewModel;
+        Assert.Equal("本地视频播放器", viewModel.MediaTitle);
+
+        await viewModel.OpenAsync(@"C:\Videos\movie.mp4");
+
+        Assert.Equal("movie.mp4", viewModel.MediaTitle);
     }
 
     [Fact]

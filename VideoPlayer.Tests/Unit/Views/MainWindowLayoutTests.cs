@@ -1,3 +1,5 @@
+using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Threading;
 using VideoPlayer.Enums;
 using VideoPlayer.Interfaces;
@@ -35,6 +37,32 @@ public sealed class MainWindowLayoutTests
         }
     }
 
+    [StaFact]
+    public void HeaderTitle_BindsToCurrentMediaTitle()
+    {
+        var player = new PlayerViewModelFixture(2);
+        var viewModel = new MainViewModel(
+            player.ViewModel,
+            new PlaylistViewModel(player.Playlist, new ImmediateUiDispatcher()),
+            new VideoInfoViewModel(new StubMediaInfoService()),
+            player.Settings);
+        var window = new MainWindow(viewModel);
+        try
+        {
+            var title = Assert.IsType<TextBlock>(window.FindName("HeaderMediaTitleText"));
+
+            Assert.Equal(
+                "Player.MediaTitle",
+                BindingOperations.GetBinding(title, TextBlock.TextProperty)?.Path.Path);
+        }
+        finally
+        {
+            window.Close();
+            window.Dispatcher.Invoke(
+                static () => { },
+                DispatcherPriority.Background);
+        }
+    }
     private sealed class ImmediateUiDispatcher : IUiDispatcher
     {
         public bool CheckAccess() => true;

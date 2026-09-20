@@ -146,6 +146,9 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     public bool HasActiveSubtitle => SelectedSubtitleTrack is not null;
 
     [ObservableProperty]
+    private string _mediaTitle = "本地视频播放器";
+
+    [ObservableProperty]
     private string _lastError = string.Empty;
 
     [ObservableProperty]
@@ -757,43 +760,11 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
                     filePath,
                     cancellationToken);
                 var info = resume.Value;
-                if (resume.IsSuccess
-                    && info is not null
-                    && ResumePolicy.ShouldAsk(info)
-                    && _dialogService is not null)
+                if (resume.IsSuccess && info is not null)
                 {
-                    var choice = await _dialogService.AskResumeAsync(
-                        Path.GetFileName(filePath),
-                        info.LastPosition,
-                        cancellationToken);
-                    if (choice == ResumeChoice.Cancel)
-                    {
-                        return ServiceResult.Failure(
-                            ErrorCode.Cancelled,
-                            string.Empty,
-                            "Resume prompt cancelled.");
-                    }
-
-                    if (choice == ResumeChoice.Restart)
-                    {
-                        var clear = await _historyService.ClearCompletedAsync(
-                            filePath,
-                            mediaSessionId: 0,
-                            cancellationToken);
-                        if (!clear.IsSuccess
-                            && clear.ErrorCode != ErrorCode.DatabaseUnavailable)
-                        {
-                            LogHistoryFailure(
-                                clear.Exception ?? new InvalidOperationException(clear.TechnicalMessage),
-                                "Failed to clear playback history.");
-                        }
-
-                        resolvedStartPosition = TimeSpan.Zero;
-                    }
-                    else
-                    {
-                        resolvedStartPosition = info.LastPosition;
-                    }
+                    resolvedStartPosition = info.IsCompleted
+                        ? TimeSpan.Zero
+                        : PlaybackMath.ClampPosition(info.LastPosition, info.Duration);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -882,6 +853,10 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }
 
         var sessionInfo = result.Value;
+        var mediaTitle = Path.GetFileName(sessionInfo.FilePath);
+        MediaTitle = string.IsNullOrWhiteSpace(mediaTitle)
+            ? "本地视频播放器"
+            : mediaTitle;
         await EnsureCurrentPlaylistItemAsync(filePath);
         AdvanceActiveSession(sessionInfo.MediaSessionId);
         Interlocked.Exchange(ref _lastPreviewTick, -1);

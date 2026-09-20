@@ -12,57 +12,7 @@ namespace VideoPlayer.Tests.Unit.ViewModels;
 public sealed class PlayerViewModelHistoryTests
 {
     [Fact]
-    public async Task OpenAsync_WhenUserContinues_StartsAtSavedPosition()
-    {
-        var mediaPath = CreateTempMediaFile();
-        try
-        {
-            var history = new FakeHistoryService
-            {
-                ResumeInfoResult = ServiceResult<ResumeInfo?>.Success(CreateResumeInfo(50))
-            };
-            var dialog = new FakeDialogService { Choice = ResumeChoice.Continue };
-            var player = new FakePlayerService();
-            await using var viewModel = CreateViewModel(player, history, dialog);
-
-            await viewModel.OpenAsync(mediaPath);
-
-            Assert.Equal(TimeSpan.FromSeconds(50), player.LastRequest!.StartPosition);
-            Assert.Equal(1, dialog.CallCount);
-        }
-        finally
-        {
-            File.Delete(mediaPath);
-        }
-    }
-
-    [Fact]
-    public async Task OpenAsync_WhenUserRestarts_ClearsHistoryAndStartsAtZero()
-    {
-        var mediaPath = CreateTempMediaFile();
-        try
-        {
-            var history = new FakeHistoryService
-            {
-                ResumeInfoResult = ServiceResult<ResumeInfo?>.Success(CreateResumeInfo(50))
-            };
-            var dialog = new FakeDialogService { Choice = ResumeChoice.Restart };
-            var player = new FakePlayerService();
-            await using var viewModel = CreateViewModel(player, history, dialog);
-
-            await viewModel.OpenAsync(mediaPath);
-
-            Assert.Equal(TimeSpan.Zero, player.LastRequest!.StartPosition);
-            Assert.Equal(1, history.ClearCompletedCallCount);
-        }
-        finally
-        {
-            File.Delete(mediaPath);
-        }
-    }
-
-    [Fact]
-    public async Task OpenAsync_WhenUserCancels_DoesNotOpenMedia()
+    public async Task OpenAsync_WithSavedPosition_ResumesWithoutPrompt()
     {
         var mediaPath = CreateTempMediaFile();
         try
@@ -77,7 +27,59 @@ public sealed class PlayerViewModelHistoryTests
 
             await viewModel.OpenAsync(mediaPath);
 
-            Assert.Equal(0, player.OpenCount);
+            Assert.Equal(TimeSpan.FromSeconds(50), player.LastRequest!.StartPosition);
+            Assert.Equal(0, dialog.CallCount);
+        }
+        finally
+        {
+            File.Delete(mediaPath);
+        }
+    }
+
+    [Fact]
+    public async Task OpenAsync_WhenHistoryCompleted_StartsAtZeroWithoutPrompt()
+    {
+        var mediaPath = CreateTempMediaFile();
+        try
+        {
+            var history = new FakeHistoryService
+            {
+                ResumeInfoResult = ServiceResult<ResumeInfo?>.Success(
+                    CreateResumeInfo(percent: 100, isCompleted: true))
+            };
+            var dialog = new FakeDialogService { Choice = ResumeChoice.Cancel };
+            var player = new FakePlayerService();
+            await using var viewModel = CreateViewModel(player, history, dialog);
+
+            await viewModel.OpenAsync(mediaPath);
+
+            Assert.Equal(TimeSpan.Zero, player.LastRequest!.StartPosition);
+            Assert.Equal(0, dialog.CallCount);
+        }
+        finally
+        {
+            File.Delete(mediaPath);
+        }
+    }
+
+    [Fact]
+    public async Task OpenAsync_WithShortSavedPosition_StillResumesWithoutPrompt()
+    {
+        var mediaPath = CreateTempMediaFile();
+        try
+        {
+            var history = new FakeHistoryService
+            {
+                ResumeInfoResult = ServiceResult<ResumeInfo?>.Success(CreateResumeInfo(10))
+            };
+            var dialog = new FakeDialogService { Choice = ResumeChoice.Cancel };
+            var player = new FakePlayerService();
+            await using var viewModel = CreateViewModel(player, history, dialog);
+
+            await viewModel.OpenAsync(mediaPath);
+
+            Assert.Equal(TimeSpan.FromSeconds(10), player.LastRequest!.StartPosition);
+            Assert.Equal(0, dialog.CallCount);
         }
         finally
         {
@@ -254,14 +256,14 @@ public sealed class PlayerViewModelHistoryTests
         Assert.Equal(expected.Position, history.LastSavedSnapshot.Position);
     }
 
-    private static ResumeInfo CreateResumeInfo(double percent)
+    private static ResumeInfo CreateResumeInfo(double percent, bool isCompleted = false)
     {
         var duration = TimeSpan.FromSeconds(100);
         return new ResumeInfo(
             @"C:\Videos\movie.mp4",
             duration,
             TimeSpan.FromSeconds(duration.TotalSeconds * percent / 100),
-            false,
+            isCompleted,
             DateTimeOffset.UtcNow,
             1);
     }

@@ -68,11 +68,15 @@
                                VerticalAlignment="Center" />
                 </StackPanel>
 
-                <TextBlock Grid.Column="1"
-                           Text="本地视频播放器"
+                <TextBlock x:Name="HeaderMediaTitleText"
+                           Grid.Column="1"
+                           Text="{Binding Player.MediaTitle}"
                            Foreground="{DynamicResource SecondaryTextBrush}"
                            HorizontalAlignment="Center"
-                           VerticalAlignment="Center" />
+                           VerticalAlignment="Center"
+                           Margin="16,0"
+                           TextTrimming="CharacterEllipsis"
+                           ToolTip="{Binding Player.MediaTitle}" />
 
                 <StackPanel Grid.Column="2"
                             Orientation="Horizontal"

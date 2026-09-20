@@ -27,6 +27,8 @@ Windows desktop media tool. Dense, dark, playback-first.
 - Opening a video always starts unmuted; volume and playback rate continue to carry across media.
 - Audio and subtitle track selectors stay out of the compact control bar.
 - A single subtitle button shows Add subtitle when no subtitle is active and Close subtitle when one is active.
+- The header media label shows the current file name and defaults to 本地视频播放器.
+- When RememberPosition is enabled, opening media resumes at the saved position automatically without a prompt.
 
 ## Interaction
 - Icon buttons use a 34x34 hit target with a visible keyboard focus ring.
