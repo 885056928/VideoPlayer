@@ -209,6 +209,17 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }, cancellationToken);
 
     [RelayCommand]
+    public Task TogglePlaybackAsync(CancellationToken cancellationToken = default)
+        => RunOnUiAsync(
+            async () =>
+            {
+                var result = PlaybackState == VideoPlayer.Enums.PlaybackState.Playing
+                    ? await _playerService.PauseAsync(cancellationToken)
+                    : await _playerService.PlayAsync(cancellationToken);
+                LastError = result.IsSuccess ? string.Empty : result.UserMessage;
+            },
+            cancellationToken);
+    [RelayCommand]
     public Task StopAsync(CancellationToken cancellationToken = default)
         => RunOnUiAsync(async () =>
         {

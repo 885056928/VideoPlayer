@@ -205,6 +205,22 @@ public sealed class PlayerViewModelFinalReviewTests
     }
 
     [Fact]
+    public async Task TogglePlaybackCommand_PausesWhenPlayingAndPlaysWhenPaused()
+    {
+        var fixture = new PlayerViewModelFixture(sessionId: 69);
+        await using var viewModel = fixture.ViewModel;
+        viewModel.PlaybackState = PlaybackState.Playing;
+
+        await viewModel.TogglePlaybackAsync();
+
+        Assert.Equal(1, fixture.Player.PauseCallCount);
+
+        viewModel.PlaybackState = PlaybackState.Paused;
+        await viewModel.TogglePlaybackAsync();
+
+        Assert.Equal(1, fixture.Player.PlayCallCount);
+    }
+    [Fact]
     public async Task OpenAsync_WhenPlayingEventArrivesBeforeOpenCompletes_TransitionsToPlaying()
     {
         var fixture = new PlayerViewModelFixture(sessionId: 68);

@@ -34,7 +34,42 @@
                 </Trigger>
             </Style.Triggers>
         </Style>
-    </UserControl.Resources>
+        <Style x:Key="CenterPlaybackButtonStyle"
+               TargetType="{x:Type Button}"
+               BasedOn="{StaticResource IconButtonStyle}">
+            <Setter Property="Width" Value="48" />
+            <Setter Property="Height" Value="48" />
+            <Setter Property="Margin" Value="8,0" />
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Grid>
+                            <Ellipse x:Name="Ring"
+                                     Fill="{DynamicResource SurfaceBrush}"
+                                     Stroke="{DynamicResource ControlBorderBrush}"
+                                     StrokeThickness="2" />
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource AccentBrush}" />
+                                <Setter TargetName="Ring" Property="Fill" Value="{DynamicResource ControlHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Ring" Property="Fill" Value="{DynamicResource ControlPressedBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource AccentBrush}" />
+                                <Setter TargetName="Ring" Property="StrokeThickness" Value="3" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>    </UserControl.Resources>
     <Grid x:Name="PlayerLayout">
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
@@ -266,38 +301,57 @@
                                 Grid.Column="1"
                                 Orientation="Horizontal"
                                 HorizontalAlignment="Center">
-                        <Button x:Name="PreviousButton"
-                                Style="{StaticResource IconButtonStyle}"
-                                Content="&#xE892;"
-                                Command="{Binding PreviousCommand}"
-                                ToolTip="上一项"
-                                AutomationProperties.Name="上一项" />
-                        <Button x:Name="PlayButton"
-                                Style="{StaticResource IconButtonStyle}"
-                                Content="&#xE768;"
-                                Command="{Binding PlayCommand}"
-                                ToolTip="播放"
-                                AutomationProperties.Name="播放" />
-                        <Button x:Name="PauseButton"
-                                Style="{StaticResource IconButtonStyle}"
-                                Content="&#xE769;"
-                                Command="{Binding PauseCommand}"
-                                ToolTip="暂停"
-                                AutomationProperties.Name="暂停" />
                         <Button x:Name="StopButton"
                                 Style="{StaticResource IconButtonStyle}"
                                 Content="&#xE71A;"
                                 Command="{Binding StopCommand}"
                                 ToolTip="停止"
                                 AutomationProperties.Name="停止" />
+                        <Button x:Name="PreviousButton"
+                                Style="{StaticResource IconButtonStyle}"
+                                Content="&#xE892;"
+                                Command="{Binding PreviousCommand}"
+                                ToolTip="上一项"
+                                AutomationProperties.Name="上一项" />
+                        <Button x:Name="PlayPauseButton"
+                                Command="{Binding TogglePlaybackCommand}"
+                                ToolTip="播放"
+                                AutomationProperties.Name="播放">
+                            <Button.Style>
+                                <Style TargetType="{x:Type Button}"
+                                       BasedOn="{StaticResource CenterPlaybackButtonStyle}">
+                                    <Setter Property="Content" Value="&#xE768;" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding PlaybackState}" Value="Playing">
+                                            <Setter Property="Content" Value="&#xE769;" />
+                                            <Setter Property="ToolTip" Value="暂停" />
+                                            <Setter Property="AutomationProperties.Name" Value="暂停" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
                         <Button x:Name="NextButton"
                                 Style="{StaticResource IconButtonStyle}"
                                 Content="&#xE893;"
                                 Command="{Binding NextCommand}"
                                 ToolTip="下一项"
                                 AutomationProperties.Name="下一项" />
+                        <Button x:Name="MuteButton"
+                                Style="{StaticResource IconButtonStyle}"
+                                Content="&#xE74F;"
+                                Command="{Binding ToggleMuteCommand}"
+                                ToolTip="静音/取消静音"
+                                AutomationProperties.Name="静音或取消静音" />
+                        <Slider x:Name="VolumeSlider"
+                                Width="110"
+                                Margin="8,0,4,0"
+                                Minimum="0"
+                                Maximum="100"
+                                Value="{Binding Volume}"
+                                ToolTip="音量"
+                                AutomationProperties.Name="音量" />
                     </StackPanel>
-
                     <StackPanel x:Name="TrackToolsGroup"
                                 Grid.Column="2"
                                 Orientation="Horizontal">
@@ -321,17 +375,7 @@
                                 Command="{Binding CloseSubtitleCommand}"
                                 ToolTip="关闭字幕"
                                 AutomationProperties.Name="关闭字幕" />
-                        <Slider Width="100"
-                                Margin="6,0"
-                                Minimum="0"
-                                Maximum="100"
-                                Value="{Binding Volume}" />
-                        <Button x:Name="MuteButton"
-                                Style="{StaticResource IconButtonStyle}"
-                                Content="&#xE74F;"
-                                Command="{Binding ToggleMuteCommand}"
-                                ToolTip="静音/取消静音"
-                                AutomationProperties.Name="静音或取消静音" />
+
                         <TextBlock Text="{Binding Rate, StringFormat={}{0:0.00}x}"
                                    Foreground="{DynamicResource PrimaryTextBrush}"
                                    VerticalAlignment="Center"

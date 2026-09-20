@@ -30,7 +30,14 @@ public sealed class PlayerViewLayoutTests
         Assert.NotNull(view.FindName("PrimaryOpenButton"));
         Assert.NotNull(view.FindName("PlaybackGroup"));
         Assert.IsType<Grid>(view.FindName("SeekGroup"));
-        Assert.IsType<StackPanel>(view.FindName("TrackToolsGroup"));
+        var playbackGroup = Assert.IsType<StackPanel>(view.FindName("PlaybackGroup"));
+        var trackTools = Assert.IsType<StackPanel>(view.FindName("TrackToolsGroup"));
+        var volumeSlider = Assert.IsType<Slider>(view.FindName("VolumeSlider"));
+
+        Assert.Same(playbackGroup, volumeSlider.Parent);
+        Assert.DoesNotContain(
+            trackTools.Children.OfType<Slider>(),
+            slider => ReferenceEquals(slider, volumeSlider));
     }
 
     [StaFact]
@@ -40,8 +47,7 @@ public sealed class PlayerViewLayoutTests
         var names = new[]
         {
             "OpenButton",
-            "PlayButton",
-            "PauseButton",
+            "PlayPauseButton",
             "StopButton",
             "PreviousButton",
             "NextButton",

@@ -50,6 +50,8 @@ public sealed class FakePlayerService : IPlayerService
         Task<ServiceResult<MediaSessionInfo>>>? OpenHandler
     { get; set; }
     public int OpenCount { get; private set; }
+    public int PlayCallCount { get; private set; }
+    public int PauseCallCount { get; private set; }
     public ServiceResult<IReadOnlyList<PlayerTrackInfo>> TracksResult { get; set; } =
         ServiceResult<IReadOnlyList<PlayerTrackInfo>>.Success([]);
     public ServiceResult SelectAudioTrackResult { get; set; } = ServiceResult.Success();
@@ -149,9 +151,16 @@ public sealed class FakePlayerService : IPlayerService
     }
 
     public Task<ServiceResult> PlayAsync(CancellationToken cancellationToken = default)
-        => Task.FromResult(ServiceResult.Success());
+    {
+        PlayCallCount++;
+        return Task.FromResult(ServiceResult.Success());
+    }
+
     public Task<ServiceResult> PauseAsync(CancellationToken cancellationToken = default)
-        => Task.FromResult(ServiceResult.Success());
+    {
+        PauseCallCount++;
+        return Task.FromResult(ServiceResult.Success());
+    }
     public Task<ServiceResult> StopAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(ServiceResult.Success());
     public Task<ServiceResult> SeekAsync(TimeSpan position, CancellationToken cancellationToken = default)
