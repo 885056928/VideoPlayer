@@ -1,3 +1,4 @@
+#Requires -Version 7
 $ErrorActionPreference = 'Stop'
 
 function Assert-PathUnder {

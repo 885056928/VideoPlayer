@@ -1,3 +1,4 @@
+#Requires -Version 7
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string]$CoveragePath
@@ -43,7 +44,7 @@ function Get-CoverageRows {
             $branchCovered = 0
             $branchTotal = 0
             $conditionCoverage = [string]$lineElement.'condition-coverage'
-            if ($conditionCoverage -match '^(\d+)%\s*\((\d+)/(\d+)\)$') {
+            if ($conditionCoverage -match '^(\d+(?:\.\d+)?)%\s*\((\d+)/(\d+)\)$') {
                 $branchCovered = [int]$Matches[2]
                 $branchTotal = [int]$Matches[3]
             }
