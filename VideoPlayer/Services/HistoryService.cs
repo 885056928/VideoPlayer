@@ -43,6 +43,11 @@ public sealed class HistoryService : IHistoryService
                 row.LastPlayedAtUtc,
                 row.PlayCount));
         }
+        catch (OperationCanceledException exception)
+        {
+            return ServiceResult<ResumeInfo?>.Failure(
+                ErrorCode.Cancelled, "播放历史查询已取消。", filePath, exception);
+        }
         catch (Exception exception)
         {
             IsAvailable = false;
@@ -116,9 +121,11 @@ public sealed class HistoryService : IHistoryService
                 ErrorCode.DatabaseUnavailable, "播放历史不可用。", filePath);
         }
 
-        await _writeGate.WaitAsync(cancellationToken);
+        var gateAcquired = false;
         try
         {
+            await _writeGate.WaitAsync(cancellationToken);
+            gateAcquired = true;
             var normalized = PathHelper.NormalizePath(filePath);
             var key = PathHelper.CreatePathKey(normalized);
             await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
@@ -139,6 +146,11 @@ public sealed class HistoryService : IHistoryService
             await context.SaveChangesAsync(cancellationToken);
             return ServiceResult.Success();
         }
+        catch (OperationCanceledException exception)
+        {
+            return ServiceResult.Failure(
+                ErrorCode.Cancelled, "播放历史保存已取消。", filePath, exception);
+        }
         catch (Exception exception)
         {
             IsAvailable = false;
@@ -147,7 +159,10 @@ public sealed class HistoryService : IHistoryService
         }
         finally
         {
-            _writeGate.Release();
+            if (gateAcquired)
+            {
+                _writeGate.Release();
+            }
         }
     }
 }

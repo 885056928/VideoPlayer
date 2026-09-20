@@ -174,6 +174,45 @@ public sealed class HistoryServiceTests
         }
     }
 
+    [Fact]
+    public async Task GetResumeInfoAsync_Cancellation_ReturnsCancelledAndKeepsAvailable()
+    {
+        var options = new DbContextOptionsBuilder<VideoPlayerDbContext>()
+            .UseSqlite("Data Source=:memory:")
+            .Options;
+        var service = new HistoryService(new TestDbContextFactory(options));
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var result = await service.GetResumeInfoAsync(
+            Path.Combine(Path.GetTempPath(), "Movie.mp4"),
+            cancellation.Token);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(ErrorCode.Cancelled, result.ErrorCode);
+        Assert.True(service.IsAvailable);
+    }
+
+    [Fact]
+    public async Task StartPlaybackAsync_Cancellation_ReturnsCancelledAndKeepsAvailable()
+    {
+        var options = new DbContextOptionsBuilder<VideoPlayerDbContext>()
+            .UseSqlite("Data Source=:memory:")
+            .Options;
+        var service = new HistoryService(new TestDbContextFactory(options));
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var result = await service.StartPlaybackAsync(
+            Path.Combine(Path.GetTempPath(), "Movie.mp4"),
+            "Movie.mp4",
+            TimeSpan.FromMinutes(2),
+            cancellation.Token);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(ErrorCode.Cancelled, result.ErrorCode);
+        Assert.True(service.IsAvailable);
+    }
     private sealed class DatabaseFixture : IAsyncDisposable
     {
         private DatabaseFixture(
