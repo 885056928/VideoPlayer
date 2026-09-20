@@ -5,6 +5,12 @@ namespace VideoPlayer.Tests.Unit.Helpers;
 
 public sealed class TimeTextHelperTests
 {
+    [Fact]
+    public void Format_ClampsNegativeTimeToZero()
+    {
+        Assert.Equal("00:00:00", TimeTextHelper.Format(TimeSpan.FromSeconds(-1)));
+    }
+
     [Theory]
     [InlineData(0, 0, 0, 123, "00:00:00")]
     [InlineData(0, 2, 3, 456, "00:02:03")]

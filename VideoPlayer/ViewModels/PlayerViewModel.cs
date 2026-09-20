@@ -31,6 +31,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     private static readonly double[] PlaybackRates = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
     private CancellationTokenSource? _progressCts;
     private CancellationTokenSource? _framePreviewCts;
+    private long _lastPreviewSecond = -1;
     private Task? _progressTask;
     private CancellationTokenSource? _historyCts;
     private Task? _historyTask;
@@ -380,6 +381,15 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }
 
         var clamped = PlaybackMath.ClampPosition(position, Duration);
+        var previewPosition = SeekHoverMath.QuantizeForPreview(clamped, Duration);
+        var previewSecond = (long)previewPosition.TotalSeconds;
+        if (previewSecond == Interlocked.Read(ref _lastPreviewSecond)
+            && !string.IsNullOrWhiteSpace(HoverPreviewPath))
+        {
+            return;
+        }
+
+        Interlocked.Exchange(ref _lastPreviewSecond, previewSecond);
         var cts = new CancellationTokenSource();
         var previous = Interlocked.Exchange(ref _framePreviewCts, cts);
         previous?.Cancel();
@@ -394,13 +404,13 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
                 "Previews");
             var fileName = Math.Abs(mediaPath.GetHashCode()).ToString("X8")
                 + "_"
-                + ((long)clamped.TotalMilliseconds).ToString(
+                + previewSecond.ToString(
                     System.Globalization.CultureInfo.InvariantCulture)
                 + ".png";
             var outputPath = Path.Combine(previewDirectory, fileName);
             var result = await _playerService.CapturePreviewFrameAsync(
                 mediaPath,
-                clamped,
+                previewPosition,
                 outputPath,
                 cts.Token).ConfigureAwait(false);
 
@@ -410,6 +420,10 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
                 && string.Equals(mediaPath, _activeMediaPath, StringComparison.OrdinalIgnoreCase))
             {
                 await ApplyUiAsync(() => HoverPreviewPath = result.Value).ConfigureAwait(false);
+            }
+            else
+            {
+                Interlocked.Exchange(ref _lastPreviewSecond, -1);
             }
         }
         catch (OperationCanceledException)
@@ -865,6 +879,8 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         var sessionInfo = result.Value;
         await EnsureCurrentPlaylistItemAsync(filePath);
         AdvanceActiveSession(sessionInfo.MediaSessionId);
+        Interlocked.Exchange(ref _lastPreviewSecond, -1);
+        HoverPreviewPath = null;
         Interlocked.Exchange(ref _startedSessionId, -1);
         Interlocked.Exchange(ref _handledEndSessionId, -1);
         Interlocked.Exchange(ref _handledFailureSessionId, -1);

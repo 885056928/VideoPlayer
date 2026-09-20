@@ -5,6 +5,7 @@
              xmlns:converters="clr-namespace:VideoPlayer.Converters">
     <UserControl.Resources>
         <converters:TimeSpanToTextConverter x:Key="TimeSpanToTextConverter" />
+        <converters:PreviewPathToImageConverter x:Key="PreviewPathToImageConverter" />
 
         <Style x:Key="ProgressTrackButtonStyle" TargetType="{x:Type RepeatButton}">
             <Setter Property="Focusable" Value="False" />
@@ -451,41 +452,40 @@
             </Grid>
         </Border>
         <Popup x:Name="SeekPreviewPopup"
-               Placement="Mouse"
+               Placement="Relative"
                PlacementTarget="{Binding ElementName=SeekSlider}"
                AllowsTransparency="True"
                StaysOpen="True"
                IsHitTestVisible="False"
-               HorizontalOffset="-100"
+               HorizontalOffset="0"
                VerticalOffset="-132">
-            <Border Background="#E61B1B1B"
+            <Border Width="180"
+                    Height="101"
+                    Background="#050505"
                     BorderBrush="{DynamicResource ControlBorderBrush}"
                     BorderThickness="1"
-                    CornerRadius="6"
-                    Padding="6">
-                <StackPanel>
-                    <Border Width="180"
-                            Height="101"
-                            Background="#050505"
-                            CornerRadius="4"
-                            BorderBrush="{DynamicResource ControlBorderBrush}"
-                            BorderThickness="1">
-                        <Grid>
-                            <TextBlock Text="&#xE714;"
-                                       FontFamily="Segoe MDL2 Assets"
-                                       FontSize="28"
-                                       Foreground="{DynamicResource SecondaryTextBrush}"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Center" />
-                            <Image Source="{Binding HoverPreviewPath}"
-                                   Stretch="UniformToFill" />
-                        </Grid>
-                    </Border>
-                    <TextBlock Text="{Binding HoverTimeText}"
-                               Foreground="{DynamicResource PrimaryTextBrush}"
+                    CornerRadius="6">
+                <Grid>
+                    <TextBlock Text="&#xE714;"
+                               FontFamily="Segoe MDL2 Assets"
+                               FontSize="28"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
                                HorizontalAlignment="Center"
-                               Margin="0,6,0,0" />
-                </StackPanel>
+                               VerticalAlignment="Center" />
+                    <Image Source="{Binding HoverPreviewPath, Converter={StaticResource PreviewPathToImageConverter}}"
+                           Stretch="UniformToFill" />
+                    <Border Background="#CC000000"
+                            CornerRadius="3"
+                            Padding="7,3"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Bottom"
+                            Margin="0,0,0,7">
+                        <TextBlock Text="{Binding HoverTimeText}"
+                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                   FontSize="12"
+                                   FontWeight="SemiBold" />
+                    </Border>
+                </Grid>
             </Border>
         </Popup>    </Grid>
 </UserControl>

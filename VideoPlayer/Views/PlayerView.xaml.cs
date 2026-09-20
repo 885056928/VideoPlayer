@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using VideoPlayer.Helpers;
 using VideoPlayer.ViewModels;
 
 namespace VideoPlayer.Views;
@@ -162,12 +163,20 @@ public partial class PlayerView : UserControl, IDisposable
             return;
         }
 
-        var ratio = Math.Clamp(
-            e.GetPosition(SeekSlider).X / SeekSlider.ActualWidth,
+        var pointerX = e.GetPosition(SeekSlider).X;
+        var position = SeekHoverMath.PositionFromRatio(
+            pointerX,
+            SeekSlider.ActualWidth,
+            viewModel.Duration);
+        SeekPreviewPopup.HorizontalOffset = Math.Clamp(
+            pointerX - 90,
             0,
-            1);
-        var position = TimeSpan.FromTicks((long)(viewModel.Duration.Ticks * ratio));
-        SeekPreviewPopup.IsOpen = true;
+            Math.Max(0, SeekSlider.ActualWidth - 180));
+        if (!SeekPreviewPopup.IsOpen)
+        {
+            SeekPreviewPopup.IsOpen = true;
+        }
+
         _ = viewModel.RequestFramePreviewAsync(position);
     }
 
