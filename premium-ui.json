@@ -1,0 +1,17 @@
+{
+  "profile": "desktop-product",
+  "sourceRoots": [
+    "VideoPlayer/Views",
+    "VideoPlayer/Resources"
+  ],
+  "requiredCommands": [
+    "build",
+    "test",
+    "acceptance"
+  ],
+  "commands": {
+    "build": "dotnet build VideoPlayer.sln -c Release --no-restore",
+    "test": "dotnet test VideoPlayer.sln -c Release --no-build --logger \"console;verbosity=minimal\"",
+    "acceptance": "pwsh -NoProfile -File scripts/acceptance/Invoke-Acceptance.ps1"
+  }
+}

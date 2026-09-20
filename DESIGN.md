@@ -14,12 +14,16 @@ Windows desktop media tool. Dense, dark, playback-first.
 - Play: E768
 - Pause: E769
 - Stop: E71A
-- Previous: E892
-- Next: E893
+- Rewind: EB9E
+- Fast forward: EB9D
 - Close subtitles: E8BA
 - Add subtitles: ED1E
 - Screenshot: E722
 - Mute: E74F
+
+## Playback controls
+- The central playback group uses stop, rewind 5 seconds, play/pause, fast forward 5 seconds, mute, and volume.
+- The volume slider uses the same visible played/remaining track and circular thumb language as the seek slider.
 
 ## Interaction
 - Icon buttons use a 34x34 hit target with a visible keyboard focus ring.

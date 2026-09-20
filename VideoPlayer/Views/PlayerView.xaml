@@ -67,6 +67,13 @@
             </Setter>
         </Style>
 
+        <Style x:Key="MediaVolumeSliderStyle"
+               TargetType="{x:Type Slider}"
+               BasedOn="{StaticResource MediaProgressSliderStyle}">
+            <Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocusVisualStyle}" />
+            <Setter Property="IsMoveToPointEnabled" Value="True" />
+        </Style>
+
         <Style x:Key="IconButtonStyle" TargetType="{x:Type Button}">
             <Setter Property="Width" Value="34" />
             <Setter Property="Height" Value="34" />
@@ -374,12 +381,12 @@
                                 Command="{Binding StopCommand}"
                                 ToolTip="停止"
                                 AutomationProperties.Name="停止" />
-                        <Button x:Name="PreviousButton"
+                        <Button x:Name="RewindButton"
                                 Style="{StaticResource IconButtonStyle}"
-                                Content="&#xE892;"
-                                Command="{Binding PreviousCommand}"
-                                ToolTip="上一项"
-                                AutomationProperties.Name="上一项" />
+                                Content="&#xEB9E;"
+                                Command="{Binding SeekBackward5Command}"
+                                ToolTip="快退 5 秒"
+                                AutomationProperties.Name="快退 5 秒" />
                         <Button x:Name="PlayPauseButton"
                                 Command="{Binding TogglePlaybackCommand}"
                                 ToolTip="播放"
@@ -398,12 +405,12 @@
                                 </Style>
                             </Button.Style>
                         </Button>
-                        <Button x:Name="NextButton"
+                        <Button x:Name="FastForwardButton"
                                 Style="{StaticResource IconButtonStyle}"
-                                Content="&#xE893;"
-                                Command="{Binding NextCommand}"
-                                ToolTip="下一项"
-                                AutomationProperties.Name="下一项" />
+                                Content="&#xEB9D;"
+                                Command="{Binding SeekForward5Command}"
+                                ToolTip="快进 5 秒"
+                                AutomationProperties.Name="快进 5 秒" />
                         <Button x:Name="MuteButton"
                                 Style="{StaticResource IconButtonStyle}"
                                 Content="&#xE74F;"
@@ -415,7 +422,10 @@
                                 Margin="8,0,4,0"
                                 Minimum="0"
                                 Maximum="100"
+                                SmallChange="1"
+                                LargeChange="5"
                                 Value="{Binding Volume}"
+                                Style="{StaticResource MediaVolumeSliderStyle}"
                                 ToolTip="音量"
                                 AutomationProperties.Name="音量" />
                     </StackPanel>

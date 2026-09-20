@@ -77,12 +77,7 @@
                 <StackPanel Grid.Column="2"
                             Orientation="Horizontal"
                             VerticalAlignment="Center">
-                    <Button x:Name="HeaderOpenFileButton"
-                            Style="{StaticResource HeaderIconButtonStyle}"
-                            Content="&#xE8E5;"
-                            Click="OpenFile_Click"
-                            ToolTip="打开视频文件"
-                            AutomationProperties.Name="打开视频文件" />
+
                     <Button x:Name="HeaderOpenFolderButton"
                             Style="{StaticResource HeaderIconButtonStyle}"
                             Content="&#xE8B7;"

@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using VideoPlayer.Views;
 using Xunit;
 
@@ -44,6 +45,44 @@ public sealed class PlayerViewLayoutTests
     }
 
     [StaFact]
+    public void PlaybackGroup_UsesFiveSecondSeekButtonsAndStyledVolumeSlider()
+    {
+        var view = new PlayerView();
+        var playbackGroup = Assert.IsType<StackPanel>(view.FindName("PlaybackGroup"));
+        var rewindButton = Assert.IsType<Button>(view.FindName("RewindButton"));
+        var fastForwardButton = Assert.IsType<Button>(view.FindName("FastForwardButton"));
+        var volumeSlider = Assert.IsType<Slider>(view.FindName("VolumeSlider"));
+
+        Assert.Null(view.FindName("PreviousButton"));
+        Assert.Null(view.FindName("NextButton"));
+        Assert.Equal("\uEB9E", rewindButton.Content);
+        Assert.Equal("\uEB9D", fastForwardButton.Content);
+        Assert.Equal("快退 5 秒", rewindButton.ToolTip);
+        Assert.Equal("快进 5 秒", fastForwardButton.ToolTip);
+        Assert.Equal(
+            "SeekBackward5Command",
+            BindingOperations.GetBinding(rewindButton, Button.CommandProperty)?.Path.Path);
+        Assert.Equal(
+            "SeekForward5Command",
+            BindingOperations.GetBinding(fastForwardButton, Button.CommandProperty)?.Path.Path);
+        Assert.Same(view.Resources["MediaVolumeSliderStyle"], volumeSlider.Style);
+        Assert.True(volumeSlider.IsMoveToPointEnabled);
+        Assert.Equal(
+            new[]
+            {
+                "StopButton",
+                "RewindButton",
+                "PlayPauseButton",
+                "FastForwardButton",
+                "MuteButton",
+                "VolumeSlider"
+            },
+            playbackGroup.Children
+                .OfType<FrameworkElement>()
+                .Select(element => element.Name));
+    }
+
+    [StaFact]
     public void IconButtons_HaveGlyphTooltipAndAutomationName()
     {
         var view = new PlayerView();
@@ -52,8 +91,8 @@ public sealed class PlayerViewLayoutTests
             "OpenButton",
             "PlayPauseButton",
             "StopButton",
-            "PreviousButton",
-            "NextButton",
+            "RewindButton",
+            "FastForwardButton",
             "CloseSubtitleButton",
             "AddSubtitleButton",
             "ScreenshotButton",
