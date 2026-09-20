@@ -273,6 +273,11 @@ public sealed class ServiceProviderShutdownTests
             CancellationToken cancellationToken = default)
             => Task.FromResult(ServiceResult.Success());
 
+        public Task<ServiceResult> TakeSnapshotAsync(
+            string outputPath,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(ServiceResult.Success());
+
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

@@ -488,6 +488,11 @@ public sealed class PlayerViewModelHistoryTests
             CancellationToken cancellationToken = default)
             => Task.FromResult(ServiceResult.Success());
 
+        public Task<ServiceResult> TakeSnapshotAsync(
+            string outputPath,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(ServiceResult.Success());
+
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
         public void RaiseStateChanged(PlaybackState state)

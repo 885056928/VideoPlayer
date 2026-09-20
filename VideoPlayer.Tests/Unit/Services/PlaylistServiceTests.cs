@@ -45,6 +45,8 @@ public sealed class PlaylistServiceTests
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
+        var previousContext = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(null);
         try
         {
             var first = Path.Combine(root, "Movie1.mp4");
@@ -69,6 +71,7 @@ public sealed class PlaylistServiceTests
         }
         finally
         {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
             Directory.Delete(root, true);
         }
     }

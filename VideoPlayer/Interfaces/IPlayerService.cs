@@ -47,4 +47,8 @@ public interface IPlayerService : IAsyncDisposable
         string filePath,
         bool select,
         CancellationToken cancellationToken = default);
+
+    Task<ServiceResult> TakeSnapshotAsync(
+        string outputPath,
+        CancellationToken cancellationToken = default);
 }

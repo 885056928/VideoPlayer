@@ -439,6 +439,30 @@ public sealed class PlayerServiceTests
             File.Delete(path);
         }
     }
+    [Fact]
+    public async Task TakeSnapshotAsync_WithoutVideo_ReturnsInvalidState()
+    {
+        var path = CreateTempMediaFile();
+        var outputPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".png");
+        await using var service = CreateService();
+
+        try
+        {
+            var opened = await service.OpenAsync(CreateRequest(path));
+            Assert.True(opened.IsSuccess);
+
+            var result = await service.TakeSnapshotAsync(outputPath);
+
+            Assert.False(result.IsSuccess);
+            Assert.Equal(ErrorCode.InvalidState, result.ErrorCode);
+            Assert.False(File.Exists(outputPath));
+        }
+        finally
+        {
+            File.Delete(path);
+            File.Delete(outputPath);
+        }
+    }
     private static PlayerService CreateService()
     {
         return new PlayerService(

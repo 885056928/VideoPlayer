@@ -22,6 +22,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     private readonly ISettingsService? _settingsService;
     private readonly IDialogService? _dialogService;
     private readonly IHistoryService? _historyService;
+    private readonly IScreenshotService? _screenshotService;
     private readonly SemaphoreSlim _progressGate = new(1, 1);
     private static readonly TimeSpan HistoryFlushTimeout = TimeSpan.FromSeconds(2);
     private const long PositionSaveThresholdTicks = TimeSpan.TicksPerSecond * 2;
@@ -39,7 +40,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     private bool _isApplyingSnapshot;
 
     public PlayerViewModel(IPlayerService playerService, IUiDispatcher dispatcher)
-        : this(playerService, dispatcher, null, null, null, null)
+        : this(playerService, dispatcher, null, null, null, null, null)
     {
     }
 
@@ -47,7 +48,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         IPlayerService playerService,
         IUiDispatcher dispatcher,
         ISubtitleService? subtitleService)
-        : this(playerService, dispatcher, null, null, null, subtitleService)
+        : this(playerService, dispatcher, null, null, null, subtitleService, null)
     {
     }
 
@@ -57,7 +58,8 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         ISettingsService settingsService,
         IDialogService dialogService,
         ISubtitleService? subtitleService = null,
-        IHistoryService? historyService = null)
+        IHistoryService? historyService = null,
+        IScreenshotService? screenshotService = null)
         : this(
             playerService,
             InlineUiDispatcher.Instance,
@@ -65,7 +67,8 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             settingsService,
             dialogService,
             subtitleService,
-            historyService)
+            historyService,
+            screenshotService)
     {
     }
 
@@ -76,7 +79,8 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         ISettingsService? settingsService,
         IDialogService? dialogService,
         ISubtitleService? subtitleService = null,
-        IHistoryService? historyService = null)
+        IHistoryService? historyService = null,
+        IScreenshotService? screenshotService = null)
     {
         ArgumentNullException.ThrowIfNull(playerService);
         ArgumentNullException.ThrowIfNull(dispatcher);
@@ -88,6 +92,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         _settingsService = settingsService;
         _dialogService = dialogService;
         _historyService = historyService;
+        _screenshotService = screenshotService;
         _playerService.StateChanged += OnStateChanged;
         _playerService.EndReached += OnEndReached;
         _playerService.TracksChanged += OnTracksChanged;
@@ -152,6 +157,33 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         await FlushHistoryAsync().ConfigureAwait(false);
         var result = await _playerService.StopAsync(cancellationToken);
         LastError = result.IsSuccess ? string.Empty : result.UserMessage;
+    }
+
+    [RelayCommand]
+    public async Task ScreenshotAsync(CancellationToken cancellationToken = default)
+    {
+        var screenshotService = _screenshotService;
+        if (screenshotService is null)
+        {
+            LastError = "截图服务不可用。";
+            return;
+        }
+
+        try
+        {
+            var result = await screenshotService.CaptureAsync(
+                _playerService.Snapshot,
+                cancellationToken);
+            LastError = result.IsSuccess ? string.Empty : result.UserMessage;
+        }
+        catch (OperationCanceledException)
+        {
+            LastError = "截图已取消。";
+        }
+        catch
+        {
+            LastError = "截图失败。";
+        }
     }
 
     [RelayCommand]

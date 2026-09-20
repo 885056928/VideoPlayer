@@ -535,6 +535,62 @@ public sealed class PlayerService : IPlayerService
         }
     }
 
+    public async Task<ServiceResult> TakeSnapshotAsync(
+        string outputPath,
+        CancellationToken cancellationToken = default)
+    {
+        await _commandGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!IsInitialized)
+            {
+                return ServiceResult.Failure(
+                    ErrorCode.PlayerNotInitialized,
+                    "播放器未初始化。",
+                    "PlayerService is disposed.");
+            }
+
+            if (_mediaPlayer.VideoTrackCount <= 0)
+            {
+                return ServiceResult.Failure(
+                    ErrorCode.InvalidState,
+                    "当前没有可截图画面。",
+                    "No video track");
+            }
+
+            if (string.IsNullOrWhiteSpace(outputPath))
+            {
+                return ServiceResult.Failure(
+                    ErrorCode.SnapshotFailed,
+                    "截图失败。",
+                    "Snapshot output path is empty.");
+            }
+
+            try
+            {
+                var success = _mediaPlayer.TakeSnapshot(0, outputPath, 0, 0);
+                return success
+                    ? ServiceResult.Success()
+                    : ServiceResult.Failure(
+                        ErrorCode.SnapshotFailed,
+                        "截图失败。",
+                        outputPath);
+            }
+            catch (Exception exception)
+            {
+                return ServiceResult.Failure(
+                    ErrorCode.SnapshotFailed,
+                    "截图失败。",
+                    outputPath,
+                    exception);
+            }
+        }
+        finally
+        {
+            _commandGate.Release();
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (!IsInitialized)

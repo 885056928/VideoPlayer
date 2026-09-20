@@ -1,3 +1,4 @@
+using System.IO;
 using VideoPlayer.Enums;
 using VideoPlayer.Interfaces;
 using VideoPlayer.Models;
@@ -16,13 +17,15 @@ public sealed class PlayerViewModelFixture
         Dialog = new FakeDialogService();
         Subtitle = new FakeSubtitleService();
         History = new FakeHistoryService();
+        Screenshot = new FakeScreenshotService();
         ViewModel = new PlayerViewModel(
             Player,
             Playlist,
             Settings,
             Dialog,
             Subtitle,
-            History);
+            History,
+            Screenshot);
     }
 
     public FakePlayerService Player { get; }
@@ -31,6 +34,7 @@ public sealed class PlayerViewModelFixture
     public FakeDialogService Dialog { get; }
     public FakeSubtitleService Subtitle { get; }
     public FakeHistoryService History { get; }
+    public FakeScreenshotService Screenshot { get; }
     public PlayerViewModel ViewModel { get; }
 }
 
@@ -51,6 +55,9 @@ public sealed class FakePlayerService : IPlayerService
     public ServiceResult SelectAudioTrackResult { get; set; } = ServiceResult.Success();
     public ServiceResult SelectSubtitleTrackResult { get; set; } = ServiceResult.Success();
     public ServiceResult AddExternalSubtitleResult { get; set; } = ServiceResult.Success();
+    public ServiceResult TakeSnapshotResult { get; set; } = ServiceResult.Success();
+    public int TakeSnapshotCallCount { get; private set; }
+    public string? LastSnapshotPath { get; private set; }
     public int LastSelectedAudioTrackId { get; private set; }
     public int? LastSelectedSubtitleTrackId { get; private set; }
     public bool WasSubtitleTrackSelected { get; private set; }
@@ -182,7 +189,44 @@ public sealed class FakePlayerService : IPlayerService
             });
     }
 
+    public Task<ServiceResult> TakeSnapshotAsync(
+        string outputPath,
+        CancellationToken cancellationToken = default)
+    {
+        TakeSnapshotCallCount++;
+        LastSnapshotPath = outputPath;
+        if (TakeSnapshotResult.IsSuccess)
+        {
+            var directory = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.WriteAllBytes(outputPath, [0]);
+        }
+
+        return Task.FromResult(TakeSnapshotResult);
+    }
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+public sealed class FakeScreenshotService : IScreenshotService
+{
+    public ServiceResult<string> CaptureResult { get; set; } =
+        ServiceResult<string>.Success("screenshot.png");
+    public int CaptureCount { get; private set; }
+    public PlaybackSnapshot? LastSnapshot { get; private set; }
+
+    public Task<ServiceResult<string>> CaptureAsync(
+        PlaybackSnapshot snapshot,
+        CancellationToken cancellationToken = default)
+    {
+        CaptureCount++;
+        LastSnapshot = snapshot;
+        return Task.FromResult(CaptureResult);
+    }
 }
 
 public sealed class FakeSubtitleService : ISubtitleService

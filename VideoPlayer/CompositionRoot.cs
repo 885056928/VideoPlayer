@@ -24,6 +24,8 @@ public static class CompositionRoot
         services.AddSingleton<DatabaseInitializer>();
         services.AddSingleton<IHistoryService, HistoryService>();
         services.AddSingleton<ISubtitleService, SubtitleService>();
+        services.AddSingleton<IMediaInfoService, MediaInfoService>();
+        services.AddSingleton<IScreenshotService, ScreenshotService>();
         services.AddSingleton<IDialogService, WpfDialogService>();
         services.AddSingleton<IUiDispatcher>(_ =>
             new WpfUiDispatcher(System.Windows.Application.Current.Dispatcher));
@@ -39,7 +41,9 @@ public static class CompositionRoot
                 provider.GetRequiredService<ISettingsService>(),
                 provider.GetRequiredService<IDialogService>(),
                 provider.GetRequiredService<ISubtitleService>(),
-                provider.GetRequiredService<IHistoryService>()));
+                provider.GetRequiredService<IHistoryService>(),
+                provider.GetRequiredService<IScreenshotService>()));
+        services.AddSingleton<VideoInfoViewModel>();
         services.AddSingleton<PlaylistViewModel>();
         services.AddSingleton<MainViewModel>();
         return services.BuildServiceProvider(new ServiceProviderOptions
