@@ -54,7 +54,7 @@ public partial class MainWindow : Window
         finally
         {
             _allowClose = true;
-            Close();
+            _ = Dispatcher.BeginInvoke((Action)Close);
         }
     }
 
