@@ -27,4 +27,28 @@ public sealed class WpfUiDispatcherTests
         Assert.False(actionExecuted);
         Assert.Equal(default, result);
     }
+
+    [StaFact]
+    public void ActiveDispatcher_ExecutesPostAndInvokeOperations()
+    {
+        var dispatcher = Dispatcher.CurrentDispatcher;
+        var subject = new WpfUiDispatcher(dispatcher);
+        var postExecuted = false;
+        var actionExecuted = false;
+        var frame = new DispatcherFrame();
+
+        subject.Post(() => postExecuted = true);
+        var invokeTask = subject.InvokeAsync(() => actionExecuted = true);
+        var resultTask = subject.InvokeAsync(() => 42);
+        _ = dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() => frame.Continue = false));
+        Dispatcher.PushFrame(frame);
+
+        Assert.True(subject.CheckAccess());
+        Assert.True(postExecuted);
+        Assert.True(actionExecuted);
+        Assert.True(invokeTask.IsCompletedSuccessfully);
+        Assert.Equal(42, resultTask.GetAwaiter().GetResult());
+    }
 }
