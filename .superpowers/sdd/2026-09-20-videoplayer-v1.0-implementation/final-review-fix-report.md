@@ -5,8 +5,8 @@
 - Wave: VideoPlayer V1.0 final-review fixes
 - Date: 2026-09-20
 - Base commit: `8276863`
-- Implementation commit: `PENDING`
-- Report commit: `PENDING`
+- Implementation commit: `5d4f29e`
+- Report commit: recorded in the final task reply.
 - Final automated status: **PASS** (Release build, 334/334 tests, coverage gate, architecture gate)
 
 ## Scope Completed
