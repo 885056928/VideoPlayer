@@ -5,6 +5,7 @@ using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using VideoPlayer.Configuration;
+using VideoPlayer.Database;
 using VideoPlayer.Interfaces;
 using VideoPlayer.Services;
 using VideoPlayer.ViewModels;
@@ -43,6 +44,8 @@ public partial class App : Application
             var settings = _services.GetRequiredService<ISettingsService>();
             await settings.LoadAsync();
 
+            await InitializeDatabaseSafelyAsync();
+
             var viewModel = _services.GetRequiredService<MainViewModel>();
             var window = new MainWindow(viewModel);
             MainWindow = window;
@@ -67,6 +70,27 @@ public partial class App : Application
         lock (_shutdownSync)
         {
             return _shutdownTask ??= DisposeServicesCoreAsync();
+        }
+    }
+
+    private async Task InitializeDatabaseSafelyAsync()
+    {
+        try
+        {
+            var result = await _services!
+                .GetRequiredService<DatabaseInitializer>()
+                .InitializeAsync();
+            if (!result.IsSuccess)
+            {
+                Log.Warning(
+                    result.Exception,
+                    "Playback history database is unavailable: {TechnicalMessage}",
+                    result.TechnicalMessage);
+            }
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "Playback history database initialization failed.");
         }
     }
 

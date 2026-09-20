@@ -1,6 +1,8 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using VideoPlayer.Configuration;
+using VideoPlayer.Database;
 using VideoPlayer.Interfaces;
 using VideoPlayer.Services;
 using VideoPlayer.ViewModels;
@@ -17,6 +19,9 @@ public static class CompositionRoot
         services.AddSingleton<IFileService, FileService>();
         services.AddSingleton<IPlaylistService, PlaylistService>();
         services.AddSingleton<ISettingsService, SettingsService>();
+        services.AddDbContextFactory<VideoPlayerDbContext>(options =>
+            options.UseSqlite("Data Source=" + paths.DatabasePath));
+        services.AddSingleton<DatabaseInitializer>();
         services.AddSingleton<ISubtitleService, SubtitleService>();
         services.AddSingleton<IDialogService, WpfDialogService>();
         services.AddSingleton<IUiDispatcher>(_ =>
