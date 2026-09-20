@@ -24,11 +24,12 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     private readonly IHistoryService? _historyService;
     private readonly SemaphoreSlim _progressGate = new(1, 1);
     private static readonly TimeSpan HistoryFlushTimeout = TimeSpan.FromSeconds(2);
+    private const long PositionSaveThresholdTicks = TimeSpan.TicksPerSecond * 2;
     private CancellationTokenSource? _progressCts;
     private Task? _progressTask;
     private CancellationTokenSource? _historyCts;
     private Task? _historyTask;
-    private TimeSpan _lastSavedPosition;
+    private long _lastSavedPositionTicks;
     private int _disposed;
     private int _navigationVersion;
     private long _activeSessionId;
@@ -446,7 +447,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        if (flushHistory)
+        if (flushHistory && Interlocked.Read(ref _activeSessionId) > 0)
         {
             await FlushHistoryAsync().ConfigureAwait(false);
             if (IsNavigationSuperseded(navigationVersion))
@@ -674,7 +675,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         Interlocked.Exchange(
             ref _historyTask,
             RunHistoryFlushAsync(historyCts.Token));
-        _lastSavedPosition = TimeSpan.Zero;
+        Interlocked.Exchange(ref _lastSavedPositionTicks, 0);
     }
 
     private async Task RunHistoryFlushAsync(CancellationToken cancellationToken)
@@ -693,8 +694,10 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 
                 var snapshot = _playerService.Snapshot;
                 cancellationToken.ThrowIfCancellationRequested();
+                var lastSavedTicks = Interlocked.Read(ref _lastSavedPositionTicks);
+                var positionTicks = snapshot.Position.Ticks;
                 if (snapshot.MediaPath is null
-                    || Math.Abs((snapshot.Position - _lastSavedPosition).TotalSeconds) < 2)
+                    || Math.Abs(positionTicks - lastSavedTicks) < PositionSaveThresholdTicks)
                 {
                     continue;
                 }
@@ -704,7 +707,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
                     .ConfigureAwait(false);
                 if (result.IsSuccess)
                 {
-                    _lastSavedPosition = snapshot.Position;
+                    Interlocked.Exchange(ref _lastSavedPositionTicks, positionTicks);
                 }
             }
         }
@@ -744,9 +747,11 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        using var flushCts = new CancellationTokenSource(HistoryFlushTimeout);
+        await SaveFinalProgressAsync(flushCts.Token).ConfigureAwait(false);
+
         try
         {
-            using var flushCts = new CancellationTokenSource(HistoryFlushTimeout);
             await _historyService.FlushAsync(flushCts.Token)
                 .WaitAsync(HistoryFlushTimeout)
                 .ConfigureAwait(false);
@@ -757,6 +762,50 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         catch (Exception exception)
         {
             LogHistoryFailure(exception, "Failed to flush playback history.");
+        }
+    }
+
+    private async Task SaveFinalProgressAsync(CancellationToken cancellationToken)
+    {
+        var historyService = _historyService;
+        if (historyService is null)
+        {
+            return;
+        }
+
+        PlaybackSnapshot snapshot;
+        try
+        {
+            if (_settingsService?.Current.Player.RememberPosition != true)
+            {
+                return;
+            }
+
+            snapshot = _playerService.Snapshot;
+        }
+        catch (Exception exception)
+        {
+            LogHistoryFailure(exception, "Failed to read the final playback snapshot.");
+            return;
+        }
+
+        if (snapshot.MediaPath is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await historyService.SaveProgressAsync(snapshot, cancellationToken)
+                .WaitAsync(HistoryFlushTimeout)
+                .ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+        }
+        catch (Exception exception)
+        {
+            LogHistoryFailure(exception, "Failed to save final playback progress.");
         }
     }
 

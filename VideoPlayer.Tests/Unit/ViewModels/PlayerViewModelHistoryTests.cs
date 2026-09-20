@@ -77,6 +77,114 @@ public sealed class PlayerViewModelHistoryTests
         Assert.Equal(1, history.StartPlaybackCallCount);
     }
 
+    [Fact]
+    public async Task PauseAsync_PersistsLatestSnapshotBeforeFlush()
+    {
+        var history = new FakeHistoryService();
+        var dialog = new FakeDialogService();
+        var player = new FakePlayerService();
+        await using var viewModel = CreateViewModel(player, history, dialog);
+        await viewModel.OpenAsync("movie.mp4");
+        var latest = CreateSnapshot("movie.mp4", TimeSpan.FromSeconds(42));
+        player.CurrentSnapshot = latest;
+
+        await viewModel.PauseAsync();
+
+        AssertPersistedLatestSnapshot(latest, history);
+        Assert.Equal(1, player.PauseCallCount);
+    }
+
+    [Fact]
+    public async Task StopAsync_PersistsLatestSnapshotBeforeFlush()
+    {
+        var history = new FakeHistoryService();
+        var dialog = new FakeDialogService();
+        var player = new FakePlayerService();
+        await using var viewModel = CreateViewModel(player, history, dialog);
+        await viewModel.OpenAsync("movie.mp4");
+        var latest = CreateSnapshot("movie.mp4", TimeSpan.FromSeconds(43));
+        player.CurrentSnapshot = latest;
+
+        await viewModel.StopAsync();
+
+        AssertPersistedLatestSnapshot(latest, history);
+        Assert.Equal(1, player.StopCallCount);
+    }
+
+    [Fact]
+    public async Task OpenAsync_WhenSwitchingMedia_PersistsLatestSnapshotBeforeFlush()
+    {
+        var history = new FakeHistoryService();
+        var dialog = new FakeDialogService();
+        var player = new FakePlayerService();
+        await using var viewModel = CreateViewModel(player, history, dialog);
+        await viewModel.OpenAsync("a.mp4");
+        var latest = CreateSnapshot("a.mp4", TimeSpan.FromSeconds(44));
+        player.CurrentSnapshot = latest;
+
+        await viewModel.OpenAsync("b.mp4");
+
+        AssertPersistedLatestSnapshot(latest, history);
+        Assert.Equal("b.mp4", player.LastRequest!.FilePath);
+    }
+
+    [Fact]
+    public async Task HandleEndReachedAsync_PersistsLatestSnapshotBeforeFlush()
+    {
+        var history = new FakeHistoryService();
+        var dialog = new FakeDialogService();
+        var player = new FakePlayerService();
+        await using var viewModel = CreateViewModel(player, history, dialog);
+        await viewModel.OpenAsync("movie.mp4");
+        var latest = CreateSnapshot("movie.mp4", TimeSpan.FromSeconds(45));
+        player.CurrentSnapshot = latest;
+
+        await viewModel.HandleEndReachedAsync(new EndReachedEventArgs
+        {
+            MediaSessionId = 7,
+            FilePath = "movie.mp4",
+            OccurredAtUtc = DateTimeOffset.UtcNow
+        });
+
+        AssertPersistedLatestSnapshot(latest, history);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_PersistsLatestSnapshotBeforeFlush()
+    {
+        var history = new FakeHistoryService();
+        var dialog = new FakeDialogService();
+        var player = new FakePlayerService();
+        var viewModel = CreateViewModel(player, history, dialog);
+        await viewModel.OpenAsync("movie.mp4");
+        var latest = CreateSnapshot("movie.mp4", TimeSpan.FromSeconds(46));
+        player.CurrentSnapshot = latest;
+
+        await viewModel.DisposeAsync();
+
+        AssertPersistedLatestSnapshot(latest, history);
+    }
+
+    [Fact]
+    public async Task PauseAsync_WhenFinalPersistenceThrows_RemainsNonFatal()
+    {
+        var history = new FakeHistoryService
+        {
+            SaveProgressException = new InvalidOperationException("database unavailable")
+        };
+        var dialog = new FakeDialogService();
+        var player = new FakePlayerService();
+        await using var viewModel = CreateViewModel(player, history, dialog);
+        await viewModel.OpenAsync("movie.mp4");
+        player.CurrentSnapshot = CreateSnapshot("movie.mp4", TimeSpan.FromSeconds(47));
+
+        await viewModel.PauseAsync();
+
+        Assert.Equal(1, player.PauseCallCount);
+        Assert.Equal(1, history.SaveProgressCallCount);
+        Assert.Equal(1, history.FlushCallCount);
+    }
+
     private static PlayerViewModel CreateViewModel(
         FakePlayerService player,
         FakeHistoryService history,
@@ -90,6 +198,35 @@ public sealed class PlayerViewModelHistoryTests
             dialog,
             subtitleService: null,
             historyService: history);
+    }
+
+    private static PlaybackSnapshot CreateSnapshot(string path, TimeSpan position)
+    {
+        return new PlaybackSnapshot(
+            7,
+            PlaybackState.Playing,
+            path,
+            position,
+            TimeSpan.FromSeconds(100),
+            80,
+            false,
+            1.0,
+            true,
+            true,
+            true,
+            DateTimeOffset.UtcNow);
+    }
+
+    private static void AssertPersistedLatestSnapshot(
+        PlaybackSnapshot expected,
+        FakeHistoryService history)
+    {
+        Assert.Equal(1, history.SaveProgressCallCount);
+        Assert.Equal(1, history.FlushCallCount);
+        Assert.Equal(1, history.SaveProgressCallCountAtFlush);
+        Assert.NotNull(history.LastSavedSnapshot);
+        Assert.Equal(expected.MediaPath, history.LastSavedSnapshot.MediaPath);
+        Assert.Equal(expected.Position, history.LastSavedSnapshot.Position);
     }
 
     private static ResumeInfo CreateResumeInfo(double percent)
@@ -128,6 +265,11 @@ public sealed class PlayerViewModelHistoryTests
         public int StartPlaybackCallCount { get; private set; }
 
         public int ClearCompletedCallCount { get; private set; }
+        public int SaveProgressCallCount { get; private set; }
+        public int FlushCallCount { get; private set; }
+        public int SaveProgressCallCountAtFlush { get; private set; }
+        public PlaybackSnapshot? LastSavedSnapshot { get; private set; }
+        public Exception? SaveProgressException { get; set; }
 
         public Task<ServiceResult<ResumeInfo?>> GetResumeInfoAsync(
             string filePath,
@@ -147,7 +289,16 @@ public sealed class PlayerViewModelHistoryTests
         public Task<ServiceResult> SaveProgressAsync(
             PlaybackSnapshot snapshot,
             CancellationToken cancellationToken = default)
-            => Task.FromResult(ServiceResult.Success());
+        {
+            SaveProgressCallCount++;
+            LastSavedSnapshot = snapshot;
+            if (SaveProgressException is not null)
+            {
+                throw SaveProgressException;
+            }
+
+            return Task.FromResult(ServiceResult.Success());
+        }
 
         public Task<ServiceResult> MarkCompletedAsync(
             string filePath,
@@ -164,7 +315,11 @@ public sealed class PlayerViewModelHistoryTests
         }
 
         public Task<ServiceResult> FlushAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(ServiceResult.Success());
+        {
+            FlushCallCount++;
+            SaveProgressCallCountAtFlush = SaveProgressCallCount;
+            return Task.FromResult(ServiceResult.Success());
+        }
     }
 
     private sealed class FakeDialogService : IDialogService
@@ -200,8 +355,17 @@ public sealed class PlayerViewModelHistoryTests
     private sealed class FakePlayerService : IPlayerService
     {
         private const long SessionId = 7;
+        private PlaybackSnapshot _snapshot = CreateSnapshot("movie.mp4", TimeSpan.FromSeconds(50));
 
         public int OpenCount { get; private set; }
+        public int PauseCallCount { get; private set; }
+        public int StopCallCount { get; private set; }
+
+        public PlaybackSnapshot CurrentSnapshot
+        {
+            get => Volatile.Read(ref _snapshot);
+            set => Volatile.Write(ref _snapshot, value);
+        }
 
         public OpenMediaRequest? LastRequest { get; private set; }
 
@@ -211,19 +375,7 @@ public sealed class PlayerViewModelHistoryTests
 
         public bool HasMedia => true;
 
-        public PlaybackSnapshot Snapshot => new(
-            SessionId,
-            PlaybackState.Playing,
-            "movie.mp4",
-            TimeSpan.FromSeconds(50),
-            TimeSpan.FromSeconds(100),
-            80,
-            false,
-            1.0,
-            true,
-            true,
-            true,
-            DateTimeOffset.UtcNow);
+        public PlaybackSnapshot Snapshot => CurrentSnapshot;
 
         public event EventHandler<PlaybackStateChangedEventArgs>? StateChanged;
 
@@ -263,6 +415,7 @@ public sealed class PlayerViewModelHistoryTests
         {
             OpenCount++;
             LastRequest = request;
+            CurrentSnapshot = CreateSnapshot(request.FilePath, TimeSpan.Zero);
             StateChanged?.Invoke(this, new PlaybackStateChangedEventArgs
             {
                 MediaSessionId = SessionId,
@@ -283,10 +436,16 @@ public sealed class PlayerViewModelHistoryTests
             => Task.FromResult(ServiceResult.Success());
 
         public Task<ServiceResult> PauseAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(ServiceResult.Success());
+        {
+            PauseCallCount++;
+            return Task.FromResult(ServiceResult.Success());
+        }
 
         public Task<ServiceResult> StopAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(ServiceResult.Success());
+        {
+            StopCallCount++;
+            return Task.FromResult(ServiceResult.Success());
+        }
 
         public Task<ServiceResult> SeekAsync(
             TimeSpan position,
