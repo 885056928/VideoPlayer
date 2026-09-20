@@ -81,6 +81,17 @@ public sealed class FakePlayerService : IPlayerService
         true,
         DateTimeOffset.UtcNow);
     public event EventHandler<PlaybackStateChangedEventArgs>? StateChanged;
+
+    public void RaiseStateChanged(PlaybackState oldState, PlaybackState newState)
+    {
+        StateChanged?.Invoke(this, new PlaybackStateChangedEventArgs
+        {
+            MediaSessionId = _sessionId,
+            OldState = oldState,
+            NewState = newState,
+            OccurredAtUtc = DateTimeOffset.UtcNow
+        });
+    }
     public event EventHandler<MediaOpenedEventArgs>? MediaOpened
     {
         add { }

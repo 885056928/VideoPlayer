@@ -4,30 +4,50 @@
              AllowDrop="True"
              Drop="OnDrop"
              DragOver="OnDragOver">
-    <Grid Background="#151515">
+    <Grid Background="{DynamicResource BackgroundBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <TextBlock Text="播放列表"
-                   Foreground="White"
+                   Foreground="{DynamicResource PrimaryTextBrush}"
                    Margin="10"
-                   FontSize="16" />
-        <ListBox Grid.Row="1"
-                 ItemsSource="{Binding Items}"
-                 Background="Transparent"
-                 Foreground="White"
-                 BorderThickness="0"
-                 VirtualizingPanel.IsVirtualizing="True"
-                 VirtualizingPanel.VirtualizationMode="Recycling"
-                 ScrollViewer.CanContentScroll="True">
-            <ListBox.ItemTemplate>
-                <DataTemplate>
-                    <TextBlock Text="{Binding FileName}" Padding="8,4" />
-                </DataTemplate>
-            </ListBox.ItemTemplate>
-        </ListBox>
+                   FontSize="16"
+                   FontWeight="SemiBold" />
+        <Grid Grid.Row="1">
+            <ListBox ItemsSource="{Binding Items}"
+                     Background="Transparent"
+                     Foreground="{DynamicResource PrimaryTextBrush}"
+                     BorderThickness="0"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     VirtualizingPanel.IsVirtualizing="True"
+                     VirtualizingPanel.VirtualizationMode="Recycling"
+                     ScrollViewer.CanContentScroll="True">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding FileName}" Padding="8,4" />
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            <TextBlock Text="播放列表为空"
+                       Foreground="{DynamicResource SecondaryTextBrush}"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       IsHitTestVisible="False">
+                <TextBlock.Style>
+                    <Style TargetType="{x:Type TextBlock}">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Items.Count}" Value="0">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </Grid>
         <Button Grid.Row="2"
                 Content="清空"
                 Command="{Binding ClearCommand}"

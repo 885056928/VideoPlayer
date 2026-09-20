@@ -25,6 +25,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     private readonly IScreenshotService? _screenshotService;
     private readonly SemaphoreSlim _progressGate = new(1, 1);
     private static readonly TimeSpan HistoryFlushTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan ScreenshotSuccessMessageLifetime = TimeSpan.FromSeconds(2);
     private const long PositionSaveThresholdTicks = TimeSpan.TicksPerSecond * 2;
     private static readonly double[] PlaybackRates = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
     private CancellationTokenSource? _progressCts;
@@ -39,6 +40,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     private long _handledEndSessionId;
     private bool _isSeeking;
     private bool _isApplyingSnapshot;
+    private int _screenshotMessageVersion;
 
     public PlayerViewModel(IPlayerService playerService, IUiDispatcher dispatcher)
         : this(playerService, dispatcher, null, null, null, null, null)
@@ -130,6 +132,18 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty]
     private bool _isMuted;
 
+    [ObservableProperty]
+    private PlaybackState _playbackState;
+
+    [ObservableProperty]
+    private string _screenshotMessage = string.Empty;
+
+    public bool IsOpening => PlaybackState == VideoPlayer.Enums.PlaybackState.Opening;
+
+    public bool HasError => !string.IsNullOrWhiteSpace(LastError);
+
+    public bool HasScreenshotMessage => !string.IsNullOrWhiteSpace(ScreenshotMessage);
+
     [RelayCommand]
     public async Task OpenAsync(string filePath, CancellationToken cancellationToken = default)
     {
@@ -171,23 +185,37 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         if (screenshotService is null)
         {
             LastError = "截图服务不可用。";
+            ClearScreenshotMessage();
             return;
         }
+
+        ClearScreenshotMessage();
 
         try
         {
             var result = await screenshotService.CaptureAsync(
                 _playerService.Snapshot,
                 cancellationToken);
-            LastError = result.IsSuccess ? string.Empty : result.UserMessage;
+            if (result.IsSuccess)
+            {
+                LastError = string.Empty;
+                ShowScreenshotSuccessMessage();
+            }
+            else
+            {
+                LastError = result.UserMessage;
+                ClearScreenshotMessage();
+            }
         }
         catch (OperationCanceledException)
         {
             LastError = "截图已取消。";
+            ClearScreenshotMessage();
         }
         catch
         {
             LastError = "截图失败。";
+            ClearScreenshotMessage();
         }
     }
 
@@ -395,6 +423,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         _playerService.StateChanged -= OnStateChanged;
         _playerService.EndReached -= OnEndReached;
         _playerService.TracksChanged -= OnTracksChanged;
+        Interlocked.Increment(ref _screenshotMessageVersion);
 
         await _progressGate.WaitAsync().ConfigureAwait(false);
         try
@@ -407,6 +436,21 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }
 
         await FlushHistoryAsync().ConfigureAwait(false);
+    }
+
+    partial void OnPlaybackStateChanged(VideoPlayer.Enums.PlaybackState value)
+    {
+        OnPropertyChanged(nameof(IsOpening));
+    }
+
+    partial void OnLastErrorChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasError));
+    }
+
+    partial void OnScreenshotMessageChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasScreenshotMessage));
     }
 
     partial void OnVolumeChanged(int value)
@@ -548,6 +592,8 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             AutoPlay: true,
             ExternalSubtitlePath: externalSubtitlePath,
             PreferredAudioLanguage: null);
+        LastError = string.Empty;
+        PlaybackState = VideoPlayer.Enums.PlaybackState.Opening;
         var result = await _playerService.OpenAsync(request, cancellationToken);
         if (IsNavigationSuperseded(navigationVersion))
         {
@@ -557,6 +603,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         if (!result.IsSuccess)
         {
             RestartHistoryFlushForActiveMedia();
+            PlaybackState = VideoPlayer.Enums.PlaybackState.Error;
             LastError = result.UserMessage;
             return;
         }
@@ -565,6 +612,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         if (sessionInfo is null)
         {
             RestartHistoryFlushForActiveMedia();
+            PlaybackState = VideoPlayer.Enums.PlaybackState.Error;
             LastError = "Unable to open the media.";
             return;
         }
@@ -701,6 +749,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             Volume = snapshot.Volume;
             Rate = snapshot.Rate;
             IsMuted = snapshot.IsMuted;
+            PlaybackState = snapshot.State;
         }
         finally
         {
@@ -734,6 +783,38 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         {
             await UpdateLastErrorAsync("速率设置失败。").ConfigureAwait(false);
         }
+    }
+
+    private void ShowScreenshotSuccessMessage()
+    {
+        var version = Interlocked.Increment(ref _screenshotMessageVersion);
+        ScreenshotMessage = "截图已保存。";
+        _ = ClearScreenshotMessageAsync(version);
+    }
+
+    private async Task ClearScreenshotMessageAsync(int version)
+    {
+        try
+        {
+            await Task.Delay(ScreenshotSuccessMessageLifetime).ConfigureAwait(false);
+            await _dispatcher.InvokeAsync(() =>
+            {
+                if (!IsDisposed
+                    && Volatile.Read(ref _screenshotMessageVersion) == version)
+                {
+                    ScreenshotMessage = string.Empty;
+                }
+            }).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private void ClearScreenshotMessage()
+    {
+        Interlocked.Increment(ref _screenshotMessageVersion);
+        ScreenshotMessage = string.Empty;
     }
 
     private async Task UpdateLastErrorAsync(string message)
@@ -1027,6 +1108,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
                 return;
             }
 
+            PlaybackState = e.NewState;
             AdvanceActiveSession(e.MediaSessionId);
             if (e.NewState != PlaybackState.Playing
                 || e.MediaSessionId != Interlocked.Read(ref _activeSessionId)
