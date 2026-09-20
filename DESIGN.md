@@ -24,6 +24,7 @@ Windows desktop media tool. Dense, dark, playback-first.
 ## Playback controls
 - The central playback group uses stop, rewind 5 seconds, play/pause, fast forward 5 seconds, mute, and volume.
 - The volume slider uses the same visible played/remaining track and circular thumb language as the seek slider.
+- Opening a video always starts unmuted; volume and playback rate continue to carry across media.
 - Audio and subtitle track selectors stay out of the compact control bar.
 - A single subtitle button shows Add subtitle when no subtitle is active and Close subtitle when one is active.
 

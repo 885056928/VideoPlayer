@@ -64,6 +64,26 @@ public sealed class PlayerServiceTests
     }
 
     [Fact]
+    public async Task OpenAsync_AfterMute_ResetsMuteForNewMedia()
+    {
+        var path = CreateTempMediaFile();
+        await using var service = CreateService();
+
+        try
+        {
+            await service.SetMuteAsync(true);
+            var opened = await service.OpenAsync(CreateRequest(path));
+
+            Assert.True(opened.IsSuccess);
+            Assert.False(service.Snapshot.IsMuted);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task DisposedService_AccessorsReturnSafeDefaults()
     {
         var service = CreateService();

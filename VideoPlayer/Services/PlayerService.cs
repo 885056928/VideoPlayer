@@ -189,6 +189,8 @@ public sealed class PlayerService : IPlayerService
                 BindMediaPlayerEvents(sessionId);
                 _mediaPlayer.Media = _media;
                 TryAttachExternalSubtitle(request.ExternalSubtitlePath);
+                // Each new media starts unmuted; volume and rate remain user preferences.
+                _isMuted = false;
                 ApplyPlaybackSettingsCore();
                 Transition(PlaybackState.Opening, sessionId);
                 PostMediaOpened(sessionId, path);
