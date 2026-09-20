@@ -22,6 +22,7 @@ public sealed class CompositionRootTests
 
             Assert.NotNull(provider.GetRequiredService<IFileService>());
             Assert.NotNull(provider.GetRequiredService<ISubtitleService>());
+            Assert.NotNull(provider.GetRequiredService<IHistoryService>());
             Assert.Same(
                 provider.GetRequiredService<ISettingsService>(),
                 provider.GetRequiredService<ISettingsService>());

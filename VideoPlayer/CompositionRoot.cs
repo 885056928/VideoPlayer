@@ -22,6 +22,7 @@ public static class CompositionRoot
         services.AddDbContextFactory<VideoPlayerDbContext>(options =>
             options.UseSqlite("Data Source=" + paths.DatabasePath));
         services.AddSingleton<DatabaseInitializer>();
+        services.AddSingleton<IHistoryService, HistoryService>();
         services.AddSingleton<ISubtitleService, SubtitleService>();
         services.AddSingleton<IDialogService, WpfDialogService>();
         services.AddSingleton<IUiDispatcher>(_ =>
