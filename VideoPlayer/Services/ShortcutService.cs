@@ -29,30 +29,29 @@ public static class ShortcutService
 {
     public static ShortcutAction Resolve(Key key, ModifierKeys modifiers)
     {
-        if (key == Key.F11) return ShortcutAction.ToggleFullscreen;
-        if (key == Key.Escape) return ShortcutAction.ExitFullscreen;
-        if (key == Key.Space) return ShortcutAction.TogglePlayPause;
-        if (key == Key.Left) return modifiers.HasFlag(ModifierKeys.Shift)
-            ? ShortcutAction.SeekBackward30
-            : ShortcutAction.SeekBackward5;
-        if (key == Key.Right) return modifiers.HasFlag(ModifierKeys.Shift)
-            ? ShortcutAction.SeekForward30
-            : ShortcutAction.SeekForward5;
-        if (key == Key.Up) return ShortcutAction.VolumeUp;
-        if (key == Key.Down) return ShortcutAction.VolumeDown;
-        if (key == Key.M) return ShortcutAction.ToggleMute;
-        if (key == Key.O && modifiers.HasFlag(ModifierKeys.Control))
-            return modifiers.HasFlag(ModifierKeys.Shift)
-                ? ShortcutAction.OpenFolder
-                : ShortcutAction.OpenFile;
-        if (key == Key.P && modifiers.HasFlag(ModifierKeys.Control))
-            return ShortcutAction.TogglePlaylist;
-        if (key == Key.OemOpenBrackets) return ShortcutAction.RateDown;
-        if (key == Key.OemCloseBrackets) return ShortcutAction.RateUp;
-        if (key == Key.OemPipe) return ShortcutAction.RateReset;
-        if (key == Key.I && modifiers.HasFlag(ModifierKeys.Control)) return ShortcutAction.VideoInfo;
-        if (key == Key.S && modifiers.HasFlag(ModifierKeys.Control) &&
-            modifiers.HasFlag(ModifierKeys.Alt)) return ShortcutAction.Screenshot;
-        return ShortcutAction.None;
+        return key switch
+        {
+            Key.F11 when modifiers == ModifierKeys.None => ShortcutAction.ToggleFullscreen,
+            Key.Escape when modifiers == ModifierKeys.None => ShortcutAction.ExitFullscreen,
+            Key.Space when modifiers == ModifierKeys.None => ShortcutAction.TogglePlayPause,
+            Key.Left when modifiers == ModifierKeys.None => ShortcutAction.SeekBackward5,
+            Key.Left when modifiers == ModifierKeys.Shift => ShortcutAction.SeekBackward30,
+            Key.Right when modifiers == ModifierKeys.None => ShortcutAction.SeekForward5,
+            Key.Right when modifiers == ModifierKeys.Shift => ShortcutAction.SeekForward30,
+            Key.Up when modifiers == ModifierKeys.None => ShortcutAction.VolumeUp,
+            Key.Down when modifiers == ModifierKeys.None => ShortcutAction.VolumeDown,
+            Key.M when modifiers == ModifierKeys.None => ShortcutAction.ToggleMute,
+            Key.O when modifiers == ModifierKeys.Control => ShortcutAction.OpenFile,
+            Key.O when modifiers == (ModifierKeys.Control | ModifierKeys.Shift)
+                => ShortcutAction.OpenFolder,
+            Key.P when modifiers == ModifierKeys.Control => ShortcutAction.TogglePlaylist,
+            Key.OemOpenBrackets when modifiers == ModifierKeys.None => ShortcutAction.RateDown,
+            Key.OemCloseBrackets when modifiers == ModifierKeys.None => ShortcutAction.RateUp,
+            Key.OemPipe when modifiers == ModifierKeys.None => ShortcutAction.RateReset,
+            Key.I when modifiers == ModifierKeys.Control => ShortcutAction.VideoInfo,
+            Key.S when modifiers == (ModifierKeys.Control | ModifierKeys.Alt)
+                => ShortcutAction.Screenshot,
+            _ => ShortcutAction.None
+        };
     }
 }

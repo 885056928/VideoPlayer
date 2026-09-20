@@ -74,7 +74,7 @@ public partial class MainWindow : Window
 
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         var action = ShortcutService.Resolve(key, Keyboard.Modifiers);
-        if (action == ShortcutAction.None)
+        if (!ShouldHandleShortcut(action, _fullscreenController.IsFullscreen))
         {
             return;
         }
@@ -82,6 +82,12 @@ public partial class MainWindow : Window
         e.Handled = true;
         await ExecuteShortcutAsync(action);
     }
+
+    internal static bool ShouldHandleShortcut(
+        ShortcutAction action,
+        bool isFullscreen)
+        => action != ShortcutAction.None
+            && (action != ShortcutAction.ExitFullscreen || isFullscreen);
 
     private async Task ExecuteShortcutAsync(ShortcutAction action)
     {
