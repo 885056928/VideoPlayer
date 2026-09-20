@@ -357,12 +357,7 @@
                                 Click="Open_Click"
                                 ToolTip="打开视频"
                                 AutomationProperties.Name="打开视频" />
-                        <Button x:Name="AddSubtitleButton"
-                                Style="{StaticResource IconButtonStyle}"
-                                Content="&#xED1E;"
-                                Click="AddSubtitle_Click"
-                                ToolTip="添加字幕"
-                                AutomationProperties.Name="添加字幕" />
+
                         <Button x:Name="ScreenshotButton"
                                 Style="{StaticResource IconButtonStyle}"
                                 Content="&#xE722;"
@@ -429,29 +424,27 @@
                                 ToolTip="音量"
                                 AutomationProperties.Name="音量" />
                     </StackPanel>
-                    <StackPanel x:Name="TrackToolsGroup"
+                    <StackPanel x:Name="PlaybackOptionsGroup"
                                 Grid.Column="2"
                                 Orientation="Horizontal">
-                        <ComboBox Width="105"
-                                  Margin="4"
-                                  ItemsSource="{Binding AudioTracks}"
-                                  SelectedItem="{Binding SelectedAudioTrack, Mode=TwoWay}"
-                                  DisplayMemberPath="Name"
-                                  ToolTip="音轨"
-                                  AutomationProperties.Name="音轨" />
-                        <ComboBox Width="105"
-                                  Margin="4"
-                                  ItemsSource="{Binding SubtitleTracks}"
-                                  SelectedItem="{Binding SelectedSubtitleTrack, Mode=TwoWay}"
-                                  DisplayMemberPath="Name"
-                                  ToolTip="字幕轨"
-                                  AutomationProperties.Name="字幕轨" />
-                        <Button x:Name="CloseSubtitleButton"
-                                Style="{StaticResource IconButtonStyle}"
-                                Content="&#xE8BA;"
-                                Command="{Binding CloseSubtitleCommand}"
-                                ToolTip="关闭字幕"
-                                AutomationProperties.Name="关闭字幕" />
+                        <Button x:Name="SubtitleButton"
+                                Click="Subtitle_Click">
+                            <Button.Style>
+                                <Style TargetType="{x:Type Button}"
+                                       BasedOn="{StaticResource IconButtonStyle}">
+                                    <Setter Property="Content" Value="&#xED1E;" />
+                                    <Setter Property="ToolTip" Value="添加字幕" />
+                                    <Setter Property="AutomationProperties.Name" Value="添加字幕" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasActiveSubtitle}" Value="True">
+                                            <Setter Property="Content" Value="&#xE8BA;" />
+                                            <Setter Property="ToolTip" Value="关闭字幕" />
+                                            <Setter Property="AutomationProperties.Name" Value="关闭字幕" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
 
                         <TextBlock Text="{Binding Rate, StringFormat={}{0:0.00}x}"
                                    Foreground="{DynamicResource PrimaryTextBrush}"

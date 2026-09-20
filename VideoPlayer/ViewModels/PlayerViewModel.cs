@@ -143,6 +143,8 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty]
     private PlayerTrackInfo? _selectedSubtitleTrack;
 
+    public bool HasActiveSubtitle => SelectedSubtitleTrack is not null;
+
     [ObservableProperty]
     private string _lastError = string.Empty;
 
@@ -703,6 +705,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 
     partial void OnSelectedSubtitleTrackChanged(PlayerTrackInfo? value)
     {
+        OnPropertyChanged(nameof(HasActiveSubtitle));
         if (_isUpdatingTracks)
         {
             return;

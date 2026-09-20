@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
+using System.Windows.Threading;
 using VideoPlayer.Views;
 using Xunit;
 
@@ -32,7 +33,7 @@ public sealed class PlayerViewLayoutTests
         Assert.NotNull(view.FindName("PrimaryOpenButton"));
         Assert.IsType<Grid>(view.FindName("SeekGroup"));
         var playbackGroup = Assert.IsType<StackPanel>(view.FindName("PlaybackGroup"));
-        var trackTools = Assert.IsType<StackPanel>(view.FindName("TrackToolsGroup"));
+        var optionsGroup = Assert.IsType<StackPanel>(view.FindName("PlaybackOptionsGroup"));
         var volumeSlider = Assert.IsType<Slider>(view.FindName("VolumeSlider"));
         var seekSlider = Assert.IsType<Slider>(view.FindName("SeekSlider"));
 
@@ -40,7 +41,7 @@ public sealed class PlayerViewLayoutTests
         Assert.IsType<Popup>(view.FindName("SeekPreviewPopup"));
         Assert.Same(playbackGroup, volumeSlider.Parent);
         Assert.DoesNotContain(
-            trackTools.Children.OfType<Slider>(),
+            optionsGroup.Children.OfType<Slider>(),
             slider => ReferenceEquals(slider, volumeSlider));
     }
 
@@ -83,6 +84,35 @@ public sealed class PlayerViewLayoutTests
     }
 
     [StaFact]
+    public void PlaybackOptions_RemoveTrackSelectorsAndUnifySubtitleAction()
+    {
+        var view = new PlayerView();
+        var optionsGroup = Assert.IsType<StackPanel>(view.FindName("PlaybackOptionsGroup"));
+        var subtitleButton = Assert.IsType<Button>(view.FindName("SubtitleButton"));
+        view.DataContext = new SubtitleStateStub(HasActiveSubtitle: false);
+
+        Assert.Null(view.FindName("TrackToolsGroup"));
+        Assert.Null(view.FindName("AddSubtitleButton"));
+        Assert.Null(view.FindName("CloseSubtitleButton"));
+        Assert.Empty(optionsGroup.Children.OfType<ComboBox>());
+        Assert.Same(optionsGroup, subtitleButton.Parent);
+        Assert.Equal("\uED1E", subtitleButton.Content);
+        Assert.Equal("添加字幕", subtitleButton.ToolTip);
+        Assert.Equal(
+            "添加字幕",
+            System.Windows.Automation.AutomationProperties.GetName(subtitleButton));
+
+        view.DataContext = new SubtitleStateStub(HasActiveSubtitle: true);
+        view.Dispatcher.Invoke(static () => { }, DispatcherPriority.DataBind);
+
+        Assert.Equal("\uE8BA", subtitleButton.Content);
+        Assert.Equal("关闭字幕", subtitleButton.ToolTip);
+        Assert.Equal(
+            "关闭字幕",
+            System.Windows.Automation.AutomationProperties.GetName(subtitleButton));
+    }
+
+    [StaFact]
     public void IconButtons_HaveGlyphTooltipAndAutomationName()
     {
         var view = new PlayerView();
@@ -93,8 +123,7 @@ public sealed class PlayerViewLayoutTests
             "StopButton",
             "RewindButton",
             "FastForwardButton",
-            "CloseSubtitleButton",
-            "AddSubtitleButton",
+            "SubtitleButton",
             "ScreenshotButton",
             "MuteButton"
         };
@@ -109,4 +138,6 @@ public sealed class PlayerViewLayoutTests
             Assert.False(string.IsNullOrWhiteSpace(System.Windows.Automation.AutomationProperties.GetName(button)));
         }
     }
+
+    private sealed record SubtitleStateStub(bool HasActiveSubtitle);
 }

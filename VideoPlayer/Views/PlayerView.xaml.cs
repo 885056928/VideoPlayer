@@ -96,12 +96,18 @@ public partial class PlayerView : UserControl, IDisposable
         }
     }
 
-    private async void AddSubtitle_Click(object sender, RoutedEventArgs e)
+    private async void Subtitle_Click(object sender, RoutedEventArgs e)
     {
         try
         {
             if (DataContext is not PlayerViewModel viewModel)
             {
+                return;
+            }
+
+            if (viewModel.HasActiveSubtitle)
+            {
+                await viewModel.CloseSubtitleAsync();
                 return;
             }
 
@@ -116,7 +122,7 @@ public partial class PlayerView : UserControl, IDisposable
         }
         catch (Exception exception)
         {
-            Serilog.Log.Warning(exception, "Manual subtitle selection failed.");
+            Serilog.Log.Warning(exception, "Subtitle action failed.");
         }
     }
 
