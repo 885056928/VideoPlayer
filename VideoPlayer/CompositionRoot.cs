@@ -17,6 +17,7 @@ public static class CompositionRoot
         services.AddSingleton<IFileService, FileService>();
         services.AddSingleton<IPlaylistService, PlaylistService>();
         services.AddSingleton<ISettingsService, SettingsService>();
+        services.AddSingleton<ISubtitleService, SubtitleService>();
         services.AddSingleton<IDialogService, WpfDialogService>();
         services.AddSingleton<IUiDispatcher>(_ =>
             new WpfUiDispatcher(System.Windows.Application.Current.Dispatcher));
@@ -30,7 +31,8 @@ public static class CompositionRoot
                 provider.GetRequiredService<IUiDispatcher>(),
                 provider.GetRequiredService<IPlaylistService>(),
                 provider.GetRequiredService<ISettingsService>(),
-                provider.GetRequiredService<IDialogService>()));
+                provider.GetRequiredService<IDialogService>(),
+                provider.GetRequiredService<ISubtitleService>()));
         services.AddSingleton<PlaylistViewModel>();
         services.AddSingleton<MainViewModel>();
         return services.BuildServiceProvider(new ServiceProviderOptions

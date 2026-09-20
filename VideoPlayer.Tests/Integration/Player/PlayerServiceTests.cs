@@ -1,3 +1,4 @@
+using LibVLCSharp.Shared;
 using System.IO;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
@@ -252,6 +253,167 @@ public sealed class PlayerServiceTests
 
             Assert.False(result.IsSuccess);
             Assert.Equal(ErrorCode.SeekNotAvailable, result.ErrorCode);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+    [Fact]
+    public async Task HandleLengthChanged_PublishesParsedAndDeduplicatedTrackEvents()
+    {
+        var path = CreateTempMediaFile();
+        var dispatcher = new QueueUiDispatcher();
+        await using var service = new PlayerService(
+            dispatcher,
+            new LoggerConfiguration().CreateLogger(),
+            ["--vout=dummy"]);
+        var parsedEvents = new List<MediaParsedEventArgs>();
+        var trackEvents = new List<TracksChangedEventArgs>();
+        service.MediaParsed += (_, args) => parsedEvents.Add(args);
+        service.TracksChanged += (_, args) => trackEvents.Add(args);
+
+        try
+        {
+            var opened = await service.OpenAsync(CreateRequest(path));
+            Assert.True(opened.IsSuccess);
+
+            service.HandleLengthChanged(opened.Value!.MediaSessionId, 1234);
+            service.HandleLengthChanged(opened.Value.MediaSessionId, 1234);
+
+            Assert.Empty(parsedEvents);
+            dispatcher.Flush();
+
+            Assert.Equal(2, parsedEvents.Count);
+            Assert.All(
+                parsedEvents,
+                args => Assert.Equal(
+                    TimeSpan.FromMilliseconds(1234),
+                    args.Duration));
+            var trackEvent = Assert.Single(trackEvents);
+            Assert.Equal(opened.Value.MediaSessionId, trackEvent.MediaSessionId);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task HandleMediaParsedChanged_Done_PublishesParsedEvent()
+    {
+        var path = CreateTempMediaFile();
+        var dispatcher = new QueueUiDispatcher();
+        await using var service = new PlayerService(
+            dispatcher,
+            new LoggerConfiguration().CreateLogger(),
+            ["--vout=dummy"]);
+        var parsedEvents = new List<MediaParsedEventArgs>();
+        service.MediaParsed += (_, args) => parsedEvents.Add(args);
+
+        try
+        {
+            var opened = await service.OpenAsync(CreateRequest(path));
+            Assert.True(opened.IsSuccess);
+
+            service.HandleMediaParsedChanged(
+                opened.Value!.MediaSessionId,
+                MediaParsedStatus.Skipped);
+            dispatcher.Flush();
+            Assert.Empty(parsedEvents);
+
+            service.HandleMediaParsedChanged(
+                opened.Value.MediaSessionId,
+                MediaParsedStatus.Done);
+            dispatcher.Flush();
+
+            var parsed = Assert.Single(parsedEvents);
+            Assert.Equal(opened.Value.MediaSessionId, parsed.MediaSessionId);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task DelayedStaleTrackEvents_AreSuppressedAfterNewSessionOpened()
+    {
+        var firstPath = CreateTempMediaFile();
+        var secondPath = CreateTempMediaFile();
+        var dispatcher = new QueueUiDispatcher();
+        await using var service = new PlayerService(
+            dispatcher,
+            new LoggerConfiguration().CreateLogger(),
+            ["--vout=dummy"]);
+        var parsedEvents = new List<MediaParsedEventArgs>();
+        service.MediaParsed += (_, args) => parsedEvents.Add(args);
+
+        try
+        {
+            var first = await service.OpenAsync(CreateRequest(firstPath));
+            Assert.True(first.IsSuccess);
+            var second = await service.OpenAsync(CreateRequest(secondPath));
+            Assert.True(second.IsSuccess);
+
+            service.HandleLengthChanged(first.Value!.MediaSessionId, 111);
+            service.HandleLengthChanged(second.Value!.MediaSessionId, 222);
+            dispatcher.Flush();
+
+            var parsed = Assert.Single(parsedEvents);
+            Assert.Equal(second.Value.MediaSessionId, parsed.MediaSessionId);
+            Assert.Equal(TimeSpan.FromMilliseconds(222), parsed.Duration);
+        }
+        finally
+        {
+            File.Delete(firstPath);
+            File.Delete(secondPath);
+        }
+    }
+    [Fact]
+    public async Task SelectAudioTrackAsync_WhenTrackDoesNotExist_DoesNotChangePlaybackState()
+    {
+        var path = CreateTempMediaFile();
+        await using var service = CreateService();
+
+        try
+        {
+            var opened = await service.OpenAsync(CreateRequest(path));
+            Assert.True(opened.IsSuccess);
+            var state = service.Snapshot.State;
+
+            var result = await service.SelectAudioTrackAsync(999);
+
+            Assert.False(result.IsSuccess);
+            Assert.Equal(ErrorCode.TrackNotFound, result.ErrorCode);
+            Assert.Equal(state, service.Snapshot.State);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task AddExternalSubtitleAsync_WhenFileIsMissing_DoesNotChangePlaybackState()
+    {
+        var path = CreateTempMediaFile();
+        var subtitlePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".srt");
+        await using var service = CreateService();
+
+        try
+        {
+            var opened = await service.OpenAsync(CreateRequest(path));
+            Assert.True(opened.IsSuccess);
+            var state = service.Snapshot.State;
+
+            var result = await service.AddExternalSubtitleAsync(
+                subtitlePath,
+                select: true);
+
+            Assert.False(result.IsSuccess);
+            Assert.Equal(ErrorCode.SubtitleNotFound, result.ErrorCode);
+            Assert.Equal(state, service.Snapshot.State);
         }
         finally
         {

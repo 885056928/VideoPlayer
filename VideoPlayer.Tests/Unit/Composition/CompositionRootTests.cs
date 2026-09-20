@@ -21,6 +21,7 @@ public sealed class CompositionRootTests
                 new LoggerConfiguration().CreateLogger());
 
             Assert.NotNull(provider.GetRequiredService<IFileService>());
+            Assert.NotNull(provider.GetRequiredService<ISubtitleService>());
             Assert.Same(
                 provider.GetRequiredService<ISettingsService>(),
                 provider.GetRequiredService<ISettingsService>());

@@ -24,12 +24,16 @@ public sealed class PlayerService : IPlayerService
     private EventHandler<EventArgs>? _stoppedHandler;
     private EventHandler<EventArgs>? _endReachedHandler;
     private EventHandler<EventArgs>? _encounteredErrorHandler;
+    private EventHandler<MediaPlayerLengthChangedEventArgs>? _lengthChangedHandler;
+    private EventHandler<MediaParsedChangedEventArgs>? _mediaParsedChangedHandler;
     private Media? _media;
     private long _sessionId;
     private int _disposed;
     private int _volume;
     private bool _isMuted;
     private double _rate = 1.0;
+    private long _lastTracksSessionId;
+    private PlayerTrackInfo[] _lastTracks = [];
 
     public PlayerService(
         IUiDispatcher dispatcher,
@@ -99,6 +103,8 @@ public sealed class PlayerService : IPlayerService
     public event EventHandler<PlaybackStateChangedEventArgs>? StateChanged;
     public event EventHandler<MediaOpenedEventArgs>? MediaOpened;
     public event EventHandler<PlaybackFailedEventArgs>? PlaybackFailed;
+    public event EventHandler<MediaParsedEventArgs>? MediaParsed;
+    public event EventHandler<TracksChangedEventArgs>? TracksChanged;
     public event EventHandler<EndReachedEventArgs>? EndReached;
 
     public async Task<ServiceResult<MediaSessionInfo>> OpenAsync(
@@ -150,6 +156,7 @@ public sealed class PlayerService : IPlayerService
                 newMedia = null;
                 BindMediaPlayerEvents(sessionId);
                 _mediaPlayer.Media = _media;
+                TryAttachExternalSubtitle(request.ExternalSubtitlePath);
                 ApplyPlaybackSettingsCore();
                 Transition(PlaybackState.Opening, sessionId);
                 PostMediaOpened(sessionId, path);
@@ -389,6 +396,138 @@ public sealed class PlayerService : IPlayerService
         }
     }
 
+    public async Task<ServiceResult<IReadOnlyList<PlayerTrackInfo>>> GetTracksAsync(
+        PlayerTrackType type,
+        CancellationToken cancellationToken = default)
+    {
+        await _commandGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!IsInitialized)
+            {
+                return ServiceResult<IReadOnlyList<PlayerTrackInfo>>.Failure(
+                    ErrorCode.PlayerNotInitialized,
+                    "播放器未初始化。",
+                    "PlayerService is disposed.");
+            }
+
+            return ServiceResult<IReadOnlyList<PlayerTrackInfo>>.Success(
+                GetTracksCore(type));
+        }
+        finally
+        {
+            _commandGate.Release();
+        }
+    }
+
+    public async Task<ServiceResult> SelectAudioTrackAsync(
+        int trackId,
+        CancellationToken cancellationToken = default)
+    {
+        await _commandGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!IsInitialized)
+            {
+                return ServiceResult.Failure(
+                    ErrorCode.PlayerNotInitialized,
+                    "播放器未初始化。",
+                    "PlayerService is disposed.");
+            }
+
+            return _mediaPlayer.SetAudioTrack(trackId)
+                ? ServiceResult.Success()
+                : ServiceResult.Failure(
+                    ErrorCode.TrackNotFound,
+                    "音轨不可用。",
+                    $"Track {trackId}");
+        }
+        finally
+        {
+            _commandGate.Release();
+        }
+    }
+
+    public async Task<ServiceResult> SelectSubtitleTrackAsync(
+        int? trackId,
+        CancellationToken cancellationToken = default)
+    {
+        await _commandGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!IsInitialized)
+            {
+                return ServiceResult.Failure(
+                    ErrorCode.PlayerNotInitialized,
+                    "播放器未初始化。",
+                    "PlayerService is disposed.");
+            }
+
+            return _mediaPlayer.SetSpu(trackId ?? -1)
+                ? ServiceResult.Success()
+                : ServiceResult.Failure(
+                    ErrorCode.TrackNotFound,
+                    "字幕轨不可用。",
+                    $"Track {trackId}");
+        }
+        finally
+        {
+            _commandGate.Release();
+        }
+    }
+
+    public async Task<ServiceResult> AddExternalSubtitleAsync(
+        string filePath,
+        bool select,
+        CancellationToken cancellationToken = default)
+    {
+        await _commandGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!IsInitialized)
+            {
+                return ServiceResult.Failure(
+                    ErrorCode.PlayerNotInitialized,
+                    "播放器未初始化。",
+                    "PlayerService is disposed.");
+            }
+
+            string uri;
+            try
+            {
+                var path = PathHelper.NormalizePath(filePath);
+                if (!File.Exists(path))
+                {
+                    return ServiceResult.Failure(
+                        ErrorCode.SubtitleNotFound,
+                        "字幕加载失败。",
+                        filePath);
+                }
+
+                uri = new Uri(path).AbsoluteUri;
+            }
+            catch (Exception exception)
+            {
+                return ServiceResult.Failure(
+                    ErrorCode.SubtitleNotFound,
+                    "字幕加载失败。",
+                    filePath,
+                    exception);
+            }
+
+            return _mediaPlayer.AddSlave(MediaSlaveType.Subtitle, uri, select)
+                ? ServiceResult.Success()
+                : ServiceResult.Failure(
+                    ErrorCode.SubtitleNotFound,
+                    "字幕加载失败。",
+                    filePath);
+        }
+        finally
+        {
+            _commandGate.Release();
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (!IsInitialized)
@@ -406,6 +545,8 @@ public sealed class PlayerService : IPlayerService
 
             UnsubscribeMediaPlayerEvents();
             StateChanged = null;
+            MediaParsed = null;
+            TracksChanged = null;
             MediaOpened = null;
             PlaybackFailed = null;
             DisposePlayerSafely();
@@ -490,6 +631,195 @@ public sealed class PlayerService : IPlayerService
         }
     }
 
+    internal void HandleLengthChanged(long sessionId, long length)
+    {
+        if (!IsCurrentSession(sessionId))
+        {
+            return;
+        }
+
+        PostMediaParsed(
+            sessionId,
+            TimeSpan.FromMilliseconds(Math.Max(0, length)));
+    }
+
+    internal void HandleMediaParsedChanged(long sessionId, MediaParsedStatus status)
+    {
+        if (status != MediaParsedStatus.Done || !IsCurrentSession(sessionId))
+        {
+            return;
+        }
+
+        PostMediaParsed(sessionId, null);
+    }
+
+    private void PostMediaParsed(long sessionId, TimeSpan? duration)
+    {
+        try
+        {
+            _dispatcher.Post(() =>
+            {
+                if (!IsCurrentSession(sessionId))
+                {
+                    return;
+                }
+
+                try
+                {
+                    var tracks = GetAllTracksCore();
+                    var args = new MediaParsedEventArgs
+                    {
+                        MediaSessionId = sessionId,
+                        Duration = duration ?? GetDuration(),
+                        HasVideo = _mediaPlayer.VideoTrackCount > 0,
+                        HasAudio = _mediaPlayer.AudioTrackCount > 0,
+                        Tracks = tracks
+                    };
+                    try
+                    {
+                        MediaParsed?.Invoke(this, args);
+                    }
+                    catch (Exception exception)
+                    {
+                        TryLogCallbackFailure(
+                            exception,
+                            "Failed to publish media parsed details for session {MediaSessionId}.",
+                            sessionId);
+                    }
+
+                    RaiseTracksChanged(sessionId, tracks);
+                }
+                catch (Exception exception)
+                {
+                    TryLogCallbackFailure(
+                        exception,
+                        "Failed to collect parsed media details for session {MediaSessionId}.",
+                        sessionId);
+                }
+            });
+        }
+        catch (Exception exception)
+        {
+            TryLogCallbackFailure(
+                exception,
+                "Failed to dispatch media parsed details for session {MediaSessionId}.",
+                sessionId);
+        }
+    }
+
+    private void RaiseTracksChanged(
+        long sessionId,
+        IReadOnlyList<PlayerTrackInfo> tracks)
+    {
+        if (!IsCurrentSession(sessionId))
+        {
+            return;
+        }
+
+        var snapshot = tracks.ToArray();
+        lock (_stateSync)
+        {
+            if (_lastTracksSessionId == sessionId
+                && _lastTracks.SequenceEqual(snapshot))
+            {
+                return;
+            }
+
+            _lastTracksSessionId = sessionId;
+            _lastTracks = snapshot;
+        }
+
+        try
+        {
+            TracksChanged?.Invoke(
+                this,
+                new TracksChangedEventArgs
+                {
+                    MediaSessionId = sessionId,
+                    Tracks = snapshot
+                });
+        }
+        catch (Exception exception)
+        {
+            TryLogCallbackFailure(
+                exception,
+                "Failed to publish track changes for session {MediaSessionId}.",
+                sessionId);
+        }
+    }
+
+    private PlayerTrackInfo[] GetTracksCore(PlayerTrackType type)
+    {
+        if (type == PlayerTrackType.Audio)
+        {
+            return _mediaPlayer.AudioTrackDescription
+                .Select(track => new PlayerTrackInfo(
+                    PlayerTrackType.Audio,
+                    track.Id,
+                    track.Name ?? $"音轨 {track.Id}",
+                    track.Name ?? "und",
+                    track.Id == _mediaPlayer.AudioTrack,
+                    false))
+                .ToArray();
+        }
+
+        return _mediaPlayer.SpuDescription
+            .Select(track => new PlayerTrackInfo(
+                PlayerTrackType.Subtitle,
+                track.Id,
+                track.Name ?? $"字幕 {track.Id}",
+                track.Name ?? "und",
+                track.Id == _mediaPlayer.Spu,
+                false))
+            .ToArray();
+    }
+
+    private PlayerTrackInfo[] GetAllTracksCore()
+    {
+        return
+        [
+            .. GetTracksCore(PlayerTrackType.Audio),
+            .. GetTracksCore(PlayerTrackType.Subtitle)
+        ];
+    }
+
+    private void TryAttachExternalSubtitle(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return;
+        }
+
+        try
+        {
+            var path = PathHelper.NormalizePath(filePath);
+            if (!File.Exists(path))
+            {
+                _logger.Warning(
+                    "External subtitle does not exist: {SubtitlePath}",
+                    path);
+                return;
+            }
+
+            if (!_mediaPlayer.AddSlave(
+                    MediaSlaveType.Subtitle,
+                    new Uri(path).AbsoluteUri,
+                    select: true))
+            {
+                _logger.Warning(
+                    "LibVLC rejected external subtitle: {SubtitlePath}",
+                    path);
+            }
+        }
+        catch (Exception exception)
+        {
+            TryLogCallbackFailure(
+                exception,
+                "Failed to attach external subtitle for session {MediaSessionId}.",
+                GetCurrentSessionId());
+        }
+    }
+
     private void BindMediaPlayerEvents(long sessionId)
     {
         _openingHandler = (_, _) => HandleMediaEvent(sessionId, PlaybackState.Opening);
@@ -498,6 +828,8 @@ public sealed class PlayerService : IPlayerService
         _stoppedHandler = (_, _) => HandleMediaEvent(sessionId, PlaybackState.Stopped);
         _endReachedHandler = (_, _) => HandleEndReached(sessionId);
         _encounteredErrorHandler = (_, _) => HandleMediaError(sessionId);
+        _lengthChangedHandler = (_, e) => HandleLengthChanged(sessionId, e.Length);
+        _mediaParsedChangedHandler = (_, e) => HandleMediaParsedChanged(sessionId, e.ParsedStatus);
 
         _mediaPlayer.Opening += _openingHandler;
         _mediaPlayer.Playing += _playingHandler;
@@ -505,6 +837,8 @@ public sealed class PlayerService : IPlayerService
         _mediaPlayer.Stopped += _stoppedHandler;
         _mediaPlayer.EndReached += _endReachedHandler;
         _mediaPlayer.EncounteredError += _encounteredErrorHandler;
+        _mediaPlayer.LengthChanged += _lengthChangedHandler;
+        _media!.ParsedChanged += _mediaParsedChangedHandler;
     }
 
     private void UnsubscribeMediaPlayerEvents()
@@ -539,12 +873,24 @@ public sealed class PlayerService : IPlayerService
             _mediaPlayer.EncounteredError -= _encounteredErrorHandler;
         }
 
+        if (_lengthChangedHandler is not null)
+        {
+            _mediaPlayer.LengthChanged -= _lengthChangedHandler;
+        }
+
+        if (_mediaParsedChangedHandler is not null && _media is not null)
+        {
+            _media.ParsedChanged -= _mediaParsedChangedHandler;
+        }
+
         _openingHandler = null;
         _playingHandler = null;
         _pausedHandler = null;
         _stoppedHandler = null;
         _endReachedHandler = null;
         _encounteredErrorHandler = null;
+        _lengthChangedHandler = null;
+        _mediaParsedChangedHandler = null;
     }
 
     private void DisposePlayerSafely()

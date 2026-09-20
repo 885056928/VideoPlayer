@@ -1,4 +1,5 @@
 using LibVLCSharp.Shared;
+using VideoPlayer.Enums;
 using VideoPlayer.Models;
 using VideoPlayer.Models.Events;
 
@@ -13,6 +14,8 @@ public interface IPlayerService : IAsyncDisposable
 
     event EventHandler<PlaybackStateChangedEventArgs>? StateChanged;
     event EventHandler<MediaOpenedEventArgs>? MediaOpened;
+    event EventHandler<MediaParsedEventArgs>? MediaParsed;
+    event EventHandler<TracksChangedEventArgs>? TracksChanged;
     event EventHandler<PlaybackFailedEventArgs>? PlaybackFailed;
     event EventHandler<EndReachedEventArgs>? EndReached;
 
@@ -27,4 +30,21 @@ public interface IPlayerService : IAsyncDisposable
     Task<ServiceResult> SetVolumeAsync(int volume, CancellationToken cancellationToken = default);
     Task<ServiceResult> SetMuteAsync(bool isMuted, CancellationToken cancellationToken = default);
     Task<ServiceResult> SetRateAsync(double rate, CancellationToken cancellationToken = default);
+
+    Task<ServiceResult<IReadOnlyList<PlayerTrackInfo>>> GetTracksAsync(
+        PlayerTrackType type,
+        CancellationToken cancellationToken = default);
+
+    Task<ServiceResult> SelectAudioTrackAsync(
+        int trackId,
+        CancellationToken cancellationToken = default);
+
+    Task<ServiceResult> SelectSubtitleTrackAsync(
+        int? trackId,
+        CancellationToken cancellationToken = default);
+
+    Task<ServiceResult> AddExternalSubtitleAsync(
+        string filePath,
+        bool select,
+        CancellationToken cancellationToken = default);
 }

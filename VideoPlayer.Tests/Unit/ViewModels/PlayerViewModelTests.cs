@@ -452,6 +452,40 @@ public sealed class PlayerViewModelTests
             return Task.FromResult(RateResult);
         }
 
+        public event EventHandler<MediaParsedEventArgs>? MediaParsed
+        {
+            add { }
+            remove { }
+        }
+
+        public event EventHandler<TracksChangedEventArgs>? TracksChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public Task<ServiceResult<IReadOnlyList<PlayerTrackInfo>>> GetTracksAsync(
+            PlayerTrackType type,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(
+                ServiceResult<IReadOnlyList<PlayerTrackInfo>>.Success([]));
+
+        public Task<ServiceResult> SelectAudioTrackAsync(
+            int trackId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(ServiceResult.Success());
+
+        public Task<ServiceResult> SelectSubtitleTrackAsync(
+            int? trackId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(ServiceResult.Success());
+
+        public Task<ServiceResult> AddExternalSubtitleAsync(
+            string filePath,
+            bool select,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(ServiceResult.Success());
+
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
         public void ResetMutationTracking()

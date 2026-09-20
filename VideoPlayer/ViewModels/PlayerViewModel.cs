@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LibVLCSharp.Shared;
@@ -12,6 +13,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly IPlayerService _playerService;
     private readonly IUiDispatcher _dispatcher;
+    private readonly ISubtitleService? _subtitleService;
     private readonly IPlaylistService? _playlistService;
     private readonly ISettingsService? _settingsService;
     private readonly IDialogService? _dialogService;
@@ -26,7 +28,15 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     private bool _isApplyingSnapshot;
 
     public PlayerViewModel(IPlayerService playerService, IUiDispatcher dispatcher)
-        : this(playerService, dispatcher, null, null, null)
+        : this(playerService, dispatcher, null, null, null, null)
+    {
+    }
+
+    public PlayerViewModel(
+        IPlayerService playerService,
+        IUiDispatcher dispatcher,
+        ISubtitleService? subtitleService)
+        : this(playerService, dispatcher, null, null, null, subtitleService)
     {
     }
 
@@ -34,13 +44,15 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         IPlayerService playerService,
         IPlaylistService playlistService,
         ISettingsService settingsService,
-        IDialogService dialogService)
+        IDialogService dialogService,
+        ISubtitleService? subtitleService = null)
         : this(
             playerService,
             InlineUiDispatcher.Instance,
             playlistService,
             settingsService,
-            dialogService)
+            dialogService,
+            subtitleService)
     {
     }
 
@@ -49,21 +61,28 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         IUiDispatcher dispatcher,
         IPlaylistService? playlistService,
         ISettingsService? settingsService,
-        IDialogService? dialogService)
+        IDialogService? dialogService,
+        ISubtitleService? subtitleService = null)
     {
         ArgumentNullException.ThrowIfNull(playerService);
         ArgumentNullException.ThrowIfNull(dispatcher);
 
         _playerService = playerService;
         _dispatcher = dispatcher;
+        _subtitleService = subtitleService;
         _playlistService = playlistService;
         _settingsService = settingsService;
         _dialogService = dialogService;
         _playerService.StateChanged += OnStateChanged;
         _playerService.EndReached += OnEndReached;
+        _playerService.TracksChanged += OnTracksChanged;
     }
 
     public MediaPlayer? MediaPlayer => _playerService.MediaPlayer;
+
+    public ObservableCollection<PlayerTrackInfo> AudioTracks { get; } = [];
+
+    public ObservableCollection<PlayerTrackInfo> SubtitleTracks { get; } = [];
 
     [ObservableProperty]
     private string _lastError = string.Empty;
@@ -115,6 +134,21 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         var result = await _playerService.StopAsync(cancellationToken);
+        LastError = result.IsSuccess ? string.Empty : result.UserMessage;
+    }
+
+    [RelayCommand]
+    public async Task SelectAudioTrackAsync(PlayerTrackInfo track)
+    {
+        ArgumentNullException.ThrowIfNull(track);
+        var result = await _playerService.SelectAudioTrackAsync(track.Id);
+        LastError = result.IsSuccess ? string.Empty : result.UserMessage;
+    }
+
+    [RelayCommand]
+    public async Task SelectSubtitleTrackAsync(PlayerTrackInfo? track)
+    {
+        var result = await _playerService.SelectSubtitleTrackAsync(track?.Id);
         LastError = result.IsSuccess ? string.Empty : result.UserMessage;
     }
 
@@ -254,6 +288,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 
         _playerService.StateChanged -= OnStateChanged;
         _playerService.EndReached -= OnEndReached;
+        _playerService.TracksChanged -= OnTracksChanged;
 
         await _progressGate.WaitAsync().ConfigureAwait(false);
         try
@@ -297,11 +332,39 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        string? externalSubtitlePath = null;
+        if (_subtitleService is not null)
+        {
+            try
+            {
+                var subtitleResult = await _subtitleService.FindAutoSubtitleAsync(
+                    filePath,
+                    cancellationToken);
+                if (subtitleResult.IsSuccess)
+                {
+                    externalSubtitlePath = subtitleResult.Value;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                // Automatic subtitle lookup is best-effort and must not block playback.
+            }
+        }
+
+        if (IsNavigationSuperseded(navigationVersion))
+        {
+            return;
+        }
+
         var request = new OpenMediaRequest(
             filePath,
             startPosition,
             AutoPlay: true,
-            ExternalSubtitlePath: null,
+            ExternalSubtitlePath: externalSubtitlePath,
             PreferredAudioLanguage: null);
         var result = await _playerService.OpenAsync(request, cancellationToken);
         if (IsNavigationSuperseded(navigationVersion))
@@ -503,6 +566,56 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         finally
         {
             progressCts.Dispose();
+        }
+    }
+
+    private void OnTracksChanged(object? sender, TracksChangedEventArgs e)
+    {
+        if (IsDisposed || e.MediaSessionId <= 0)
+        {
+            return;
+        }
+
+        AdvanceActiveSession(e.MediaSessionId);
+        if (e.MediaSessionId != Interlocked.Read(ref _activeSessionId))
+        {
+            return;
+        }
+
+        var tracks = e.Tracks.ToArray();
+        try
+        {
+            _dispatcher.Post(() =>
+            {
+                if (IsDisposed
+                    || e.MediaSessionId != Interlocked.Read(ref _activeSessionId))
+                {
+                    return;
+                }
+
+                ApplyTracks(tracks);
+            });
+        }
+        catch (Exception)
+        {
+            // Track updates are non-critical and must not affect playback.
+        }
+    }
+
+    private void ApplyTracks(IReadOnlyList<PlayerTrackInfo> tracks)
+    {
+        AudioTracks.Clear();
+        SubtitleTracks.Clear();
+        foreach (var track in tracks)
+        {
+            if (track.Type == Enums.PlayerTrackType.Audio)
+            {
+                AudioTracks.Add(track);
+            }
+            else
+            {
+                SubtitleTracks.Add(track);
+            }
         }
     }
 

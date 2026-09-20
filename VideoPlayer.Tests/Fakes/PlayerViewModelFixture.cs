@@ -14,17 +14,20 @@ public sealed class PlayerViewModelFixture
         Playlist = new FakePlaylistService();
         Settings = new FakeSettingsService();
         Dialog = new FakeDialogService();
+        Subtitle = new FakeSubtitleService();
         ViewModel = new PlayerViewModel(
             Player,
             Playlist,
             Settings,
-            Dialog);
+            Dialog,
+            Subtitle);
     }
 
     public FakePlayerService Player { get; }
     public FakePlaylistService Playlist { get; }
     public FakeSettingsService Settings { get; }
     public FakeDialogService Dialog { get; }
+    public FakeSubtitleService Subtitle { get; }
     public PlayerViewModel ViewModel { get; }
 }
 
@@ -37,8 +40,19 @@ public sealed class FakePlayerService : IPlayerService
     public Func<
         OpenMediaRequest,
         CancellationToken,
-        Task<ServiceResult<MediaSessionInfo>>>? OpenHandler { get; set; }
+        Task<ServiceResult<MediaSessionInfo>>>? OpenHandler
+    { get; set; }
     public int OpenCount { get; private set; }
+    public ServiceResult<IReadOnlyList<PlayerTrackInfo>> TracksResult { get; set; } =
+        ServiceResult<IReadOnlyList<PlayerTrackInfo>>.Success([]);
+    public ServiceResult SelectAudioTrackResult { get; set; } = ServiceResult.Success();
+    public ServiceResult SelectSubtitleTrackResult { get; set; } = ServiceResult.Success();
+    public ServiceResult AddExternalSubtitleResult { get; set; } = ServiceResult.Success();
+    public int LastSelectedAudioTrackId { get; private set; }
+    public int? LastSelectedSubtitleTrackId { get; private set; }
+    public bool WasSubtitleTrackSelected { get; private set; }
+    public string? LastExternalSubtitlePath { get; private set; }
+    public bool LastExternalSubtitleSelect { get; private set; }
     public OpenMediaRequest? LastRequest { get; private set; }
     public LibVLCSharp.Shared.MediaPlayer? MediaPlayer => null;
     public bool IsInitialized => true;
@@ -63,6 +77,12 @@ public sealed class FakePlayerService : IPlayerService
         remove { }
     }
 
+    public event EventHandler<MediaParsedEventArgs>? MediaParsed
+    {
+        add { }
+        remove { }
+    }
+    public event EventHandler<TracksChangedEventArgs>? TracksChanged;
     public event EventHandler<PlaybackFailedEventArgs>? PlaybackFailed
     {
         add { }
@@ -116,9 +136,81 @@ public sealed class FakePlayerService : IPlayerService
         => Task.FromResult(ServiceResult.Success());
     public Task<ServiceResult> SetRateAsync(double rate, CancellationToken cancellationToken = default)
         => Task.FromResult(ServiceResult.Success());
+    public Task<ServiceResult<IReadOnlyList<PlayerTrackInfo>>> GetTracksAsync(
+        PlayerTrackType type,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(TracksResult);
+
+    public Task<ServiceResult> SelectAudioTrackAsync(
+        int trackId,
+        CancellationToken cancellationToken = default)
+    {
+        LastSelectedAudioTrackId = trackId;
+        return Task.FromResult(SelectAudioTrackResult);
+    }
+
+    public Task<ServiceResult> SelectSubtitleTrackAsync(
+        int? trackId,
+        CancellationToken cancellationToken = default)
+    {
+        LastSelectedSubtitleTrackId = trackId;
+        WasSubtitleTrackSelected = true;
+        return Task.FromResult(SelectSubtitleTrackResult);
+    }
+
+    public Task<ServiceResult> AddExternalSubtitleAsync(
+        string filePath,
+        bool select,
+        CancellationToken cancellationToken = default)
+    {
+        LastExternalSubtitlePath = filePath;
+        LastExternalSubtitleSelect = select;
+        return Task.FromResult(AddExternalSubtitleResult);
+    }
+
+    public void RaiseTracksChanged(params PlayerTrackInfo[] tracks)
+    {
+        TracksChanged?.Invoke(
+            this,
+            new TracksChangedEventArgs
+            {
+                MediaSessionId = _sessionId,
+                Tracks = tracks
+            });
+    }
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
+public sealed class FakeSubtitleService : ISubtitleService
+{
+    public ServiceResult<string> FindAutoSubtitleResult { get; set; } =
+        ServiceResult<string>.Failure(
+            ErrorCode.SubtitleNotFound,
+            "没有找到自动字幕。",
+            "Not found");
+    public ServiceResult ValidateSubtitleResult { get; set; } = ServiceResult.Success();
+    public int FindCallCount { get; private set; }
+    public string? LastMediaPath { get; private set; }
+    public string? LastSubtitlePath { get; private set; }
+
+    public Task<ServiceResult<string>> FindAutoSubtitleAsync(
+        string mediaPath,
+        CancellationToken cancellationToken = default)
+    {
+        FindCallCount++;
+        LastMediaPath = mediaPath;
+        return Task.FromResult(FindAutoSubtitleResult);
+    }
+
+    public Task<ServiceResult> ValidateSubtitleAsync(
+        string subtitlePath,
+        CancellationToken cancellationToken = default)
+    {
+        LastSubtitlePath = subtitlePath;
+        return Task.FromResult(ValidateSubtitleResult);
+    }
+}
 public sealed class FakePlaylistService : IPlaylistService
 {
     private readonly PlaylistItem[] _items =
