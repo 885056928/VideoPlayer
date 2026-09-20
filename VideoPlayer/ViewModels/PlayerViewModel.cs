@@ -26,6 +26,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     private readonly SemaphoreSlim _progressGate = new(1, 1);
     private static readonly TimeSpan HistoryFlushTimeout = TimeSpan.FromSeconds(2);
     private const long PositionSaveThresholdTicks = TimeSpan.TicksPerSecond * 2;
+    private static readonly double[] PlaybackRates = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
     private CancellationTokenSource? _progressCts;
     private Task? _progressTask;
     private CancellationTokenSource? _historyCts;
@@ -99,6 +100,10 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     }
 
     public MediaPlayer? MediaPlayer => _playerService.MediaPlayer;
+
+    public PlaybackSnapshot Snapshot => _playerService.Snapshot;
+
+    public IReadOnlyList<PlayerTrackInfo> Tracks => [.. AudioTracks, .. SubtitleTracks];
 
     public ObservableCollection<PlayerTrackInfo> AudioTracks { get; } = [];
 
@@ -204,6 +209,55 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     public Task SeekAsync(CancellationToken cancellationToken = default)
         => SeekToAsync(Position, cancellationToken);
+
+    [RelayCommand]
+    public async Task TogglePlayPauseAsync(CancellationToken cancellationToken = default)
+    {
+        if (_playerService.Snapshot.State == PlaybackState.Playing)
+        {
+            await PauseAsync(cancellationToken);
+        }
+        else
+        {
+            await PlayAsync(cancellationToken);
+        }
+    }
+
+    [RelayCommand]
+    public Task SeekBackward5Async(CancellationToken cancellationToken = default)
+        => SeekRelativeAsync(TimeSpan.FromSeconds(-5), cancellationToken);
+
+    [RelayCommand]
+    public Task SeekForward5Async(CancellationToken cancellationToken = default)
+        => SeekRelativeAsync(TimeSpan.FromSeconds(5), cancellationToken);
+
+    [RelayCommand]
+    public Task SeekBackward30Async(CancellationToken cancellationToken = default)
+        => SeekRelativeAsync(TimeSpan.FromSeconds(-30), cancellationToken);
+
+    [RelayCommand]
+    public Task SeekForward30Async(CancellationToken cancellationToken = default)
+        => SeekRelativeAsync(TimeSpan.FromSeconds(30), cancellationToken);
+
+    [RelayCommand]
+    public void VolumeUp()
+        => Volume = PlaybackMath.ClampVolume(Volume + 5);
+
+    [RelayCommand]
+    public void VolumeDown()
+        => Volume = PlaybackMath.ClampVolume(Volume - 5);
+
+    [RelayCommand]
+    public void RateDown()
+        => ChangeRate(-1);
+
+    [RelayCommand]
+    public void RateUp()
+        => ChangeRate(1);
+
+    [RelayCommand]
+    public void RateReset()
+        => Rate = 1.0;
 
     public async Task NextAsync()
     {
@@ -564,6 +618,36 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         {
             _progressGate.Release();
         }
+    }
+
+    private Task SeekRelativeAsync(TimeSpan offset, CancellationToken cancellationToken)
+    {
+        var target = PlaybackMath.ClampPosition(Position + offset, Duration);
+        return SeekToAsync(target, cancellationToken);
+    }
+
+    private void ChangeRate(int direction)
+    {
+        var currentIndex = FindClosestRateIndex(Rate);
+        var nextIndex = Math.Clamp(currentIndex + direction, 0, PlaybackRates.Length - 1);
+        Rate = PlaybackRates[nextIndex];
+    }
+
+    private static int FindClosestRateIndex(double rate)
+    {
+        var closestIndex = 0;
+        var closestDistance = double.MaxValue;
+        for (var index = 0; index < PlaybackRates.Length; index++)
+        {
+            var distance = Math.Abs(PlaybackRates[index] - rate);
+            if (distance < closestDistance)
+            {
+                closestDistance = distance;
+                closestIndex = index;
+            }
+        }
+
+        return closestIndex;
     }
 
     private async Task SeekToAsync(TimeSpan position, CancellationToken cancellationToken)

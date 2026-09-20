@@ -11,9 +11,9 @@
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="300" />
+            <ColumnDefinition x:Name="PlaylistColumn" Width="300" />
         </Grid.ColumnDefinitions>
         <views:PlayerView x:Name="PlayerView" DataContext="{Binding Player}" />
-        <views:PlaylistView Grid.Column="1" DataContext="{Binding Playlist}" />
+        <views:PlaylistView x:Name="PlaylistView" Grid.Column="1" DataContext="{Binding Playlist}" />
     </Grid>
 </Window>

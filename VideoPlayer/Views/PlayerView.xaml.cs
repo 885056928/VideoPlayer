@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using VideoPlayer.ViewModels;
 
@@ -8,9 +9,57 @@ namespace VideoPlayer.Views;
 
 public partial class PlayerView : UserControl, IDisposable
 {
+    private static readonly TimeSpan ControlBarIdleTimeout = TimeSpan.FromSeconds(2);
+    private readonly DispatcherTimer _controlBarTimer;
+
     public PlayerView()
     {
         InitializeComponent();
+        _controlBarTimer = new DispatcherTimer
+        {
+            Interval = ControlBarIdleTimeout
+        };
+        _controlBarTimer.Tick += ControlBarTimer_Tick;
+        PreviewMouseMove += PlayerView_PreviewMouseMove;
+        PreviewMouseDown += PlayerView_PreviewMouseDown;
+        Loaded += PlayerView_Loaded;
+        Unloaded += PlayerView_Unloaded;
+    }
+
+    private void PlayerView_Loaded(object sender, RoutedEventArgs e)
+    {
+        ShowControlBar();
+    }
+
+    private void PlayerView_Unloaded(object sender, RoutedEventArgs e)
+    {
+        _controlBarTimer.Stop();
+    }
+
+    private void PlayerView_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        ShowControlBar();
+    }
+
+    private void PlayerView_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        ShowControlBar();
+    }
+
+    private void ControlBarTimer_Tick(object? sender, EventArgs e)
+    {
+        _controlBarTimer.Stop();
+        ControlBar.Visibility = Visibility.Collapsed;
+    }
+
+    private void ShowControlBar()
+    {
+        ControlBar.Visibility = Visibility.Visible;
+        _controlBarTimer.Stop();
+        if (IsLoaded)
+        {
+            _controlBarTimer.Start();
+        }
     }
 
     private async void Open_Click(object sender, RoutedEventArgs e)
@@ -80,6 +129,12 @@ public partial class PlayerView : UserControl, IDisposable
 
     public void Dispose()
     {
+        _controlBarTimer.Stop();
+        _controlBarTimer.Tick -= ControlBarTimer_Tick;
+        PreviewMouseMove -= PlayerView_PreviewMouseMove;
+        PreviewMouseDown -= PlayerView_PreviewMouseDown;
+        Loaded -= PlayerView_Loaded;
+        Unloaded -= PlayerView_Unloaded;
         VideoView.Dispose();
     }
 }

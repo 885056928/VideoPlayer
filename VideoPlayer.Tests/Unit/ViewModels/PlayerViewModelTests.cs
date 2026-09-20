@@ -251,6 +251,93 @@ public sealed class PlayerViewModelTests
         Assert.Equal(TimeSpan.Zero, viewModel.Position);
     }
 
+    [Fact]
+    public async Task TogglePlayPauseAsync_WhenPlaying_Pauses()
+    {
+        var fake = new FakePlayerService
+        {
+            CurrentSnapshot = CreateSnapshot(TimeSpan.Zero, TimeSpan.FromMinutes(1))
+        };
+        await using var viewModel = CreateViewModel(fake);
+
+        await viewModel.TogglePlayPauseAsync();
+
+        Assert.Equal(1, fake.PauseCallCount);
+        Assert.Equal(0, fake.PlayCallCount);
+    }
+
+    [Fact]
+    public async Task TogglePlayPauseAsync_WhenPaused_Plays()
+    {
+        var fake = new FakePlayerService
+        {
+            CurrentSnapshot = CreateSnapshot(TimeSpan.Zero, TimeSpan.FromMinutes(1))
+                with { State = PlaybackState.Paused }
+        };
+        await using var viewModel = CreateViewModel(fake);
+
+        await viewModel.TogglePlayPauseAsync();
+
+        Assert.Equal(1, fake.PlayCallCount);
+        Assert.Equal(0, fake.PauseCallCount);
+    }
+
+    [Fact]
+    public async Task SeekCommands_AreClampedToMediaBounds()
+    {
+        var fake = new FakePlayerService();
+        await using var viewModel = CreateViewModel(fake);
+        viewModel.Position = TimeSpan.FromSeconds(3);
+        viewModel.Duration = TimeSpan.FromMinutes(1);
+
+        await viewModel.SeekBackward5Async();
+
+        Assert.Equal(TimeSpan.Zero, fake.LastSeekPosition);
+
+        viewModel.Position = TimeSpan.FromSeconds(50);
+        await viewModel.SeekForward30Async();
+
+        Assert.Equal(TimeSpan.FromMinutes(1), fake.LastSeekPosition);
+    }
+
+    [Fact]
+    public async Task VolumeCommands_AdjustByFiveAndClamp()
+    {
+        var fake = new FakePlayerService();
+        await using var viewModel = CreateViewModel(fake);
+        viewModel.Volume = 98;
+
+        viewModel.VolumeUp();
+        await WaitUntilAsync(() => fake.LastVolume == 100);
+
+        viewModel.VolumeDown();
+        viewModel.VolumeDown();
+        await WaitUntilAsync(() => fake.LastVolume == 90);
+
+        Assert.Equal(90, viewModel.Volume);
+    }
+
+    [Fact]
+    public async Task RateCommands_UsePresetStepsAndReset()
+    {
+        var fake = new FakePlayerService();
+        await using var viewModel = CreateViewModel(fake);
+        viewModel.Rate = 0.5;
+
+        viewModel.RateUp();
+        await WaitUntilAsync(() => fake.LastRate == 0.75);
+
+        viewModel.RateUp();
+        await WaitUntilAsync(() => fake.LastRate == 1.0);
+
+        viewModel.RateDown();
+        await WaitUntilAsync(() => fake.LastRate == 0.75);
+
+        viewModel.RateReset();
+        await WaitUntilAsync(() => fake.LastRate == 1.0);
+
+        Assert.Equal(1.0, viewModel.Rate);
+    }
     private static PlayerViewModel CreateViewModel(FakePlayerService fake)
         => new(fake, new ImmediateUiDispatcher());
 
@@ -330,6 +417,8 @@ public sealed class PlayerViewModelTests
 
         public OpenMediaRequest? LastRequest { get; private set; }
         public ServiceResult PlayResult { get; set; } = ServiceResult.Success();
+        public int PlayCallCount { get; private set; }
+        public int PauseCallCount { get; private set; }
         public ServiceResult VolumeResult { get; set; } = ServiceResult.Success();
         public ServiceResult RateResult { get; set; } = ServiceResult.Success();
         public TaskCompletionSource<bool> SnapshotStarted { get; set; } = NewCompletionSource();
@@ -403,10 +492,16 @@ public sealed class PlayerViewModelTests
         }
 
         public Task<ServiceResult> PlayAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(PlayResult);
+        {
+            PlayCallCount++;
+            return Task.FromResult(PlayResult);
+        }
 
         public Task<ServiceResult> PauseAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(ServiceResult.Success());
+        {
+            PauseCallCount++;
+            return Task.FromResult(ServiceResult.Success());
+        }
 
         public Task<ServiceResult> StopAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(ServiceResult.Success());

@@ -36,6 +36,14 @@ public sealed partial class PlaylistViewModel : ObservableObject
         LastError = result.IsSuccess ? string.Empty : result.UserMessage;
     }
 
+    public async Task AddFolderAsync(string folderPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(folderPath);
+
+        var result = await _playlistService.AddFolderAsync(folderPath, recursive: false);
+        LastError = result.IsSuccess ? string.Empty : result.UserMessage;
+    }
+
     public async Task RemoveAsync(PlaylistItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
