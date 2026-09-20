@@ -38,5 +38,6 @@ Windows desktop media tool. Dense, dark, playback-first.
 - Current time and duration use `HH:MM:SS`; fractional seconds are never displayed.
 - The played portion uses the accent color; the remaining portion uses the border/control color.
 - The progress thumb is a circular ball with a visible accent outline.
+- Clicking anywhere on the seek bar jumps directly to that position; seeking preserves the current playing or paused state.
 - Hovering the progress bar opens a non-interactive preview containing the hover time and a single-frame image.
 - Frame previews use 0.2-second nodes, a 100ms hover debounce, and a reusable hidden preview player; preview failure falls back to time-only display.

@@ -608,7 +608,9 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         return await NextAsync();
     }
 
-    public void BeginSeek()
+    public void BeginSeek() => BeginSeek(Position);
+
+    public void BeginSeek(TimeSpan position)
     {
         if (_isSeeking)
         {
@@ -616,7 +618,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }
 
         _isSeeking = true;
-        PendingSeekPosition = Position.TotalSeconds;
+        PendingSeekPosition = PlaybackMath.ClampPosition(position, Duration).TotalSeconds;
     }
 
     public Task CommitSeekAsync(CancellationToken cancellationToken = default)

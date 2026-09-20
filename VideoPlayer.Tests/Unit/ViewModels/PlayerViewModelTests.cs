@@ -54,6 +54,26 @@ public sealed class PlayerViewModelTests
         Assert.Equal(TimeSpan.FromSeconds(42.5), fake.LastSeekPosition);
     }
 
+    [Theory]
+    [InlineData(PlaybackState.Playing)]
+    [InlineData(PlaybackState.Paused)]
+    public async Task ClickSeek_CommitsClickedPositionAndPreservesPlaybackState(
+        PlaybackState playbackState)
+    {
+        var fake = new FakePlayerService();
+        await using var viewModel = CreateViewModel(fake);
+        viewModel.Duration = TimeSpan.FromMinutes(2);
+        viewModel.PlaybackState = playbackState;
+        viewModel.BeginSeek(TimeSpan.FromSeconds(75.5));
+
+        await viewModel.CommitSeekAsync();
+
+        Assert.Equal(75.5, fake.LastSeekPosition!.Value.TotalSeconds);
+        Assert.Equal(playbackState, viewModel.PlaybackState);
+        Assert.Equal(0, fake.PlayCallCount);
+        Assert.Equal(0, fake.PauseCallCount);
+    }
+
     [Fact]
     public async Task PlayAsync_WhenServiceFails_SetsLastError()
     {

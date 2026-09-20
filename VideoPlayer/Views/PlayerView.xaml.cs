@@ -128,10 +128,19 @@ public partial class PlayerView : UserControl, IDisposable
 
     private void SeekSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (DataContext is PlayerViewModel viewModel)
+        if (DataContext is not PlayerViewModel viewModel
+            || viewModel.Duration <= TimeSpan.Zero
+            || SeekSlider.ActualWidth <= 0)
         {
-            viewModel.BeginSeek();
+            return;
         }
+
+        var pointerX = e.GetPosition(SeekSlider).X;
+        var position = SeekHoverMath.PositionFromRatio(
+            pointerX,
+            SeekSlider.ActualWidth,
+            viewModel.Duration);
+        viewModel.BeginSeek(position);
     }
 
     private async void SeekSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -174,6 +183,11 @@ public partial class PlayerView : UserControl, IDisposable
             pointerX,
             SeekSlider.ActualWidth,
             viewModel.Duration);
+        if (e.LeftButton == MouseButtonState.Pressed)
+        {
+            viewModel.PendingSeekPosition = position.TotalSeconds;
+        }
+
         SeekPreviewPopup.HorizontalOffset = Math.Clamp(
             pointerX - 90,
             0,
