@@ -17,13 +17,20 @@ public static class CompositionRoot
         services.AddSingleton<IFileService, FileService>();
         services.AddSingleton<IPlaylistService, PlaylistService>();
         services.AddSingleton<ISettingsService, SettingsService>();
+        services.AddSingleton<IDialogService, WpfDialogService>();
         services.AddSingleton<IUiDispatcher>(_ =>
             new WpfUiDispatcher(System.Windows.Application.Current.Dispatcher));
         services.AddSingleton<IPlayerService>(provider =>
             new PlayerService(
                 provider.GetRequiredService<IUiDispatcher>(),
                 provider.GetRequiredService<ILogger>()));
-        services.AddSingleton<PlayerViewModel>();
+        services.AddSingleton<PlayerViewModel>(provider =>
+            new PlayerViewModel(
+                provider.GetRequiredService<IPlayerService>(),
+                provider.GetRequiredService<IUiDispatcher>(),
+                provider.GetRequiredService<IPlaylistService>(),
+                provider.GetRequiredService<ISettingsService>(),
+                provider.GetRequiredService<IDialogService>()));
         services.AddSingleton<PlaylistViewModel>();
         services.AddSingleton<MainViewModel>();
         return services.BuildServiceProvider(new ServiceProviderOptions

@@ -4,6 +4,7 @@ using LibVLCSharp.Shared;
 using VideoPlayer.Helpers;
 using VideoPlayer.Interfaces;
 using VideoPlayer.Models;
+using VideoPlayer.Models.Events;
 
 namespace VideoPlayer.ViewModels;
 
@@ -11,17 +12,55 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly IPlayerService _playerService;
     private readonly IUiDispatcher _dispatcher;
+    private readonly IPlaylistService? _playlistService;
+    private readonly ISettingsService? _settingsService;
+    private readonly IDialogService? _dialogService;
     private readonly SemaphoreSlim _progressGate = new(1, 1);
     private CancellationTokenSource? _progressCts;
     private Task? _progressTask;
     private int _disposed;
+    private int _navigationVersion;
+    private long _activeSessionId;
+    private long _handledEndSessionId;
     private bool _isSeeking;
     private bool _isApplyingSnapshot;
 
     public PlayerViewModel(IPlayerService playerService, IUiDispatcher dispatcher)
+        : this(playerService, dispatcher, null, null, null)
     {
+    }
+
+    public PlayerViewModel(
+        IPlayerService playerService,
+        IPlaylistService playlistService,
+        ISettingsService settingsService,
+        IDialogService dialogService)
+        : this(
+            playerService,
+            InlineUiDispatcher.Instance,
+            playlistService,
+            settingsService,
+            dialogService)
+    {
+    }
+
+    internal PlayerViewModel(
+        IPlayerService playerService,
+        IUiDispatcher dispatcher,
+        IPlaylistService? playlistService,
+        ISettingsService? settingsService,
+        IDialogService? dialogService)
+    {
+        ArgumentNullException.ThrowIfNull(playerService);
+        ArgumentNullException.ThrowIfNull(dispatcher);
+
         _playerService = playerService;
         _dispatcher = dispatcher;
+        _playlistService = playlistService;
+        _settingsService = settingsService;
+        _dialogService = dialogService;
+        _playerService.StateChanged += OnStateChanged;
+        _playerService.EndReached += OnEndReached;
     }
 
     public MediaPlayer? MediaPlayer => _playerService.MediaPlayer;
@@ -50,25 +89,12 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     public async Task OpenAsync(string filePath, CancellationToken cancellationToken = default)
     {
-        var request = new OpenMediaRequest(
+        var navigationVersion = Interlocked.Increment(ref _navigationVersion);
+        await OpenCoreAsync(
             filePath,
             TimeSpan.Zero,
-            AutoPlay: true,
-            ExternalSubtitlePath: null,
-            PreferredAudioLanguage: null);
-        var result = await _playerService.OpenAsync(request, cancellationToken);
-        if (!result.IsSuccess)
-        {
-            LastError = result.UserMessage;
-            return;
-        }
-
-        var volumeResult = await _playerService.SetVolumeAsync(Volume, cancellationToken);
-        var rateResult = await _playerService.SetRateAsync(Rate, cancellationToken);
-        var failedResult = !volumeResult.IsSuccess ? volumeResult : rateResult;
-        LastError = failedResult.IsSuccess ? string.Empty : failedResult.UserMessage;
-
-        await StartProgressRefreshAsync(cancellationToken);
+            navigationVersion,
+            cancellationToken);
     }
 
     [RelayCommand]
@@ -95,6 +121,90 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     public Task SeekAsync(CancellationToken cancellationToken = default)
         => SeekToAsync(Position, cancellationToken);
+
+    public async Task NextAsync()
+    {
+        var playlistService = _playlistService;
+        if (playlistService is null)
+        {
+            LastError = "Navigation is unavailable.";
+            return;
+        }
+
+        var navigationVersion = Interlocked.Increment(ref _navigationVersion);
+        var next = playlistService.GetNext();
+        if (!next.IsSuccess)
+        {
+            LastError = next.UserMessage;
+            return;
+        }
+
+        await OpenCoreAsync(
+            next.Value!.FilePath,
+            TimeSpan.Zero,
+            navigationVersion,
+            CancellationToken.None);
+    }
+
+    public async Task PreviousAsync()
+    {
+        var playlistService = _playlistService;
+        if (playlistService is null)
+        {
+            LastError = "Navigation is unavailable.";
+            return;
+        }
+
+        var navigationVersion = Interlocked.Increment(ref _navigationVersion);
+        var previous = playlistService.GetPrevious();
+        if (!previous.IsSuccess)
+        {
+            LastError = previous.UserMessage;
+            return;
+        }
+
+        await OpenCoreAsync(
+            previous.Value!.FilePath,
+            TimeSpan.Zero,
+            navigationVersion,
+            CancellationToken.None);
+    }
+
+    public async Task HandleEndReachedAsync(EndReachedEventArgs args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        if (args.MediaSessionId != Interlocked.Read(ref _activeSessionId)
+            || Interlocked.Exchange(ref _handledEndSessionId, args.MediaSessionId)
+                == args.MediaSessionId)
+        {
+            return;
+        }
+
+        if (_settingsService?.Current.Player.AutoPlayNext != true)
+        {
+            return;
+        }
+
+        var playlistService = _playlistService;
+        if (playlistService is null)
+        {
+            return;
+        }
+
+        var navigationVersion = Interlocked.Increment(ref _navigationVersion);
+        var next = playlistService.GetNext();
+        if (!next.IsSuccess)
+        {
+            return;
+        }
+
+        await OpenCoreAsync(
+            next.Value!.FilePath,
+            TimeSpan.Zero,
+            navigationVersion,
+            CancellationToken.None);
+    }
 
     public void BeginSeek()
     {
@@ -132,28 +242,8 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         LastError = result.IsSuccess ? string.Empty : result.UserMessage;
     }
 
-    public async Task StartProgressRefreshAsync(CancellationToken cancellationToken = default)
-    {
-        await _progressGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await StopProgressLoopCoreAsync().ConfigureAwait(false);
-            if (IsDisposed)
-            {
-                return;
-            }
-
-            var progressCts = new CancellationTokenSource();
-            _progressCts = progressCts;
-            _progressTask = Task.Run(
-                () => RunProgressLoopAsync(progressCts.Token),
-                CancellationToken.None);
-        }
-        finally
-        {
-            _progressGate.Release();
-        }
-    }
+    public Task StartProgressRefreshAsync(CancellationToken cancellationToken = default)
+        => StartProgressRefreshCoreAsync(null, cancellationToken);
 
     public async ValueTask DisposeAsync()
     {
@@ -161,6 +251,9 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         {
             return;
         }
+
+        _playerService.StateChanged -= OnStateChanged;
+        _playerService.EndReached -= OnEndReached;
 
         await _progressGate.WaitAsync().ConfigureAwait(false);
         try
@@ -191,6 +284,92 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }
 
         _ = ApplyRateAsync(value);
+    }
+
+    private async Task OpenCoreAsync(
+        string filePath,
+        TimeSpan startPosition,
+        int navigationVersion,
+        CancellationToken cancellationToken)
+    {
+        if (IsNavigationSuperseded(navigationVersion))
+        {
+            return;
+        }
+
+        var request = new OpenMediaRequest(
+            filePath,
+            startPosition,
+            AutoPlay: true,
+            ExternalSubtitlePath: null,
+            PreferredAudioLanguage: null);
+        var result = await _playerService.OpenAsync(request, cancellationToken);
+        if (IsNavigationSuperseded(navigationVersion))
+        {
+            return;
+        }
+
+        if (!result.IsSuccess)
+        {
+            LastError = result.UserMessage;
+            return;
+        }
+
+        var sessionInfo = result.Value;
+        if (sessionInfo is null)
+        {
+            LastError = "Unable to open the media.";
+            return;
+        }
+
+        AdvanceActiveSession(sessionInfo.MediaSessionId);
+
+        var volumeResult = await _playerService.SetVolumeAsync(Volume, cancellationToken);
+        if (IsNavigationSuperseded(navigationVersion))
+        {
+            return;
+        }
+
+        var rateResult = await _playerService.SetRateAsync(Rate, cancellationToken);
+        if (IsNavigationSuperseded(navigationVersion))
+        {
+            return;
+        }
+
+        var failedResult = !volumeResult.IsSuccess ? volumeResult : rateResult;
+        LastError = failedResult.IsSuccess ? string.Empty : failedResult.UserMessage;
+
+        await StartProgressRefreshCoreAsync(navigationVersion, cancellationToken);
+    }
+
+    private async Task StartProgressRefreshCoreAsync(
+        int? navigationVersion,
+        CancellationToken cancellationToken)
+    {
+        await _progressGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (IsSuperseded(navigationVersion))
+            {
+                return;
+            }
+
+            await StopProgressLoopCoreAsync().ConfigureAwait(false);
+            if (IsSuperseded(navigationVersion) || IsDisposed)
+            {
+                return;
+            }
+
+            var progressCts = new CancellationTokenSource();
+            _progressCts = progressCts;
+            _progressTask = Task.Run(
+                () => RunProgressLoopAsync(progressCts.Token),
+                CancellationToken.None);
+        }
+        finally
+        {
+            _progressGate.Release();
+        }
     }
 
     private async Task SeekToAsync(TimeSpan position, CancellationToken cancellationToken)
@@ -327,5 +506,61 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    private void OnStateChanged(object? sender, PlaybackStateChangedEventArgs e)
+    {
+        AdvanceActiveSession(e.MediaSessionId);
+    }
+
+    private async void OnEndReached(object? sender, EndReachedEventArgs e)
+    {
+        await HandleEndReachedAsync(e);
+    }
+
+    private void AdvanceActiveSession(long sessionId)
+    {
+        if (sessionId <= 0)
+        {
+            return;
+        }
+
+        long activeSessionId;
+        do
+        {
+            activeSessionId = Interlocked.Read(ref _activeSessionId);
+            if (sessionId <= activeSessionId)
+            {
+                return;
+            }
+        }
+        while (Interlocked.CompareExchange(
+            ref _activeSessionId,
+            sessionId,
+            activeSessionId) != activeSessionId);
+    }
+
+    private bool IsNavigationSuperseded(int navigationVersion)
+        => IsDisposed || Volatile.Read(ref _navigationVersion) != navigationVersion;
+
+    private bool IsSuperseded(int? navigationVersion)
+        => navigationVersion is int value && IsNavigationSuperseded(value);
+
     private bool IsDisposed => Volatile.Read(ref _disposed) != 0;
+
+    private sealed class InlineUiDispatcher : IUiDispatcher
+    {
+        public static InlineUiDispatcher Instance { get; } = new();
+
+        public bool CheckAccess() => true;
+
+        public void Post(Action action) => action();
+
+        public Task InvokeAsync(Action action)
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        public Task<T> InvokeAsync<T>(Func<T> action)
+            => Task.FromResult(action());
+    }
 }

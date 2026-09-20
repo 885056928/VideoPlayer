@@ -99,6 +99,7 @@ public sealed class PlayerService : IPlayerService
     public event EventHandler<PlaybackStateChangedEventArgs>? StateChanged;
     public event EventHandler<MediaOpenedEventArgs>? MediaOpened;
     public event EventHandler<PlaybackFailedEventArgs>? PlaybackFailed;
+    public event EventHandler<EndReachedEventArgs>? EndReached;
 
     public async Task<ServiceResult<MediaSessionInfo>> OpenAsync(
         OpenMediaRequest request,
@@ -432,6 +433,45 @@ public sealed class PlayerService : IPlayerService
         }
     }
 
+    internal void HandleEndReached(long sessionId)
+    {
+        if (!IsCurrentSession(sessionId))
+        {
+            return;
+        }
+
+        try
+        {
+            Transition(PlaybackState.Ended, sessionId);
+            if (!IsCurrentSession(sessionId))
+            {
+                return;
+            }
+
+            var filePath = GetMediaPath() ?? string.Empty;
+            _dispatcher.Post(() =>
+            {
+                if (!IsCurrentSession(sessionId))
+                {
+                    return;
+                }
+
+                EndReached?.Invoke(
+                    this,
+                    new EndReachedEventArgs
+                    {
+                        MediaSessionId = sessionId,
+                        FilePath = filePath,
+                        OccurredAtUtc = DateTimeOffset.UtcNow
+                    });
+            });
+        }
+        catch (Exception exception)
+        {
+            HandleCallbackFailure(sessionId, exception);
+        }
+    }
+
     internal void HandleMediaError(long sessionId)
     {
         if (!IsCurrentSession(sessionId))
@@ -456,7 +496,7 @@ public sealed class PlayerService : IPlayerService
         _playingHandler = (_, _) => HandleMediaEvent(sessionId, PlaybackState.Playing);
         _pausedHandler = (_, _) => HandleMediaEvent(sessionId, PlaybackState.Paused);
         _stoppedHandler = (_, _) => HandleMediaEvent(sessionId, PlaybackState.Stopped);
-        _endReachedHandler = (_, _) => HandleMediaEvent(sessionId, PlaybackState.Ended);
+        _endReachedHandler = (_, _) => HandleEndReached(sessionId);
         _encounteredErrorHandler = (_, _) => HandleMediaError(sessionId);
 
         _mediaPlayer.Opening += _openingHandler;

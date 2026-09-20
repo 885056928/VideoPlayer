@@ -14,6 +14,7 @@ public interface IPlayerService : IAsyncDisposable
     event EventHandler<PlaybackStateChangedEventArgs>? StateChanged;
     event EventHandler<MediaOpenedEventArgs>? MediaOpened;
     event EventHandler<PlaybackFailedEventArgs>? PlaybackFailed;
+    event EventHandler<EndReachedEventArgs>? EndReached;
 
     Task<ServiceResult<MediaSessionInfo>> OpenAsync(
         OpenMediaRequest request,

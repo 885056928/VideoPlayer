@@ -387,6 +387,12 @@ public sealed class PlayerViewModelTests
             remove { }
         }
 
+        public event EventHandler<EndReachedEventArgs>? EndReached
+        {
+            add { }
+            remove { }
+        }
+
         public Task<ServiceResult<MediaSessionInfo>> OpenAsync(
             OpenMediaRequest request,
             CancellationToken cancellationToken = default)
