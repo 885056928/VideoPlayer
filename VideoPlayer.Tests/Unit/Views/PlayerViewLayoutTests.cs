@@ -23,6 +23,17 @@ public sealed class PlayerViewLayoutTests
     }
 
     [StaFact]
+    public void Layout_HasPrimaryOpenStateAndThreeControlGroups()
+    {
+        var view = new PlayerView();
+
+        Assert.NotNull(view.FindName("PrimaryOpenButton"));
+        Assert.NotNull(view.FindName("PlaybackGroup"));
+        Assert.IsType<Grid>(view.FindName("SeekGroup"));
+        Assert.IsType<StackPanel>(view.FindName("TrackToolsGroup"));
+    }
+
+    [StaFact]
     public void IconButtons_HaveGlyphTooltipAndAutomationName()
     {
         var view = new PlayerView();

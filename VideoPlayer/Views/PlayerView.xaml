@@ -68,16 +68,46 @@
                                 </Style.Triggers>
                             </Style>
                         </Border.Style>
-                        <StackPanel>
-                            <TextBlock Text="打开视频文件或文件夹"
+                        <StackPanel x:Name="EmptyStatePanel"
+                                    HorizontalAlignment="Center">
+                            <Border Width="76"
+                                    Height="76"
+                                    CornerRadius="16"
+                                    Background="{DynamicResource SurfaceBrush}"
+                                    BorderBrush="{DynamicResource ControlBorderBrush}"
+                                    BorderThickness="1">
+                                <TextBlock Text="&#xE714;"
+                                           FontFamily="Segoe MDL2 Assets"
+                                           FontSize="34"
+                                           Foreground="{DynamicResource AccentBrush}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock Text="VideoPlayer"
                                        Foreground="{DynamicResource PrimaryTextBrush}"
-                                       FontSize="20"
+                                       FontSize="24"
                                        FontWeight="SemiBold"
+                                       Margin="0,14,0,0"
                                        HorizontalAlignment="Center" />
-                            <TextBlock Text="支持常见视频格式，也可以将文件拖放到右侧播放列表"
+                            <TextBlock Text="本地视频播放器"
                                        Foreground="{DynamicResource SecondaryTextBrush}"
-                                       Margin="0,8,0,0"
+                                       Margin="0,4,0,0"
                                        HorizontalAlignment="Center" />
+                            <Button x:Name="PrimaryOpenButton"
+                                    HorizontalAlignment="Center"
+                                    Margin="0,18,0,0"
+                                    Padding="14,7"
+                                    Click="Open_Click"
+                                    ToolTip="打开视频"
+                                    AutomationProperties.Name="打开视频">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE8E5;"
+                                               FontFamily="Segoe MDL2 Assets"
+                                               Margin="0,0,8,0"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock Text="打开文件" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
                         </StackPanel>
                     </Border>
 
@@ -175,102 +205,140 @@
                 VerticalAlignment="Bottom"
                 Background="#D91B1B1B"
                 Padding="8">
-            <WrapPanel Orientation="Horizontal">
-                <Button x:Name="OpenButton"
-                        Style="{StaticResource IconButtonStyle}"
-                        Content="&#xE8E5;"
-                        Click="Open_Click"
-                        ToolTip="打开视频"
-                        AutomationProperties.Name="打开视频" />
-                <Button x:Name="PlayButton"
-                        Style="{StaticResource IconButtonStyle}"
-                        Content="&#xE768;"
-                        Command="{Binding PlayCommand}"
-                        ToolTip="播放"
-                        AutomationProperties.Name="播放" />
-                <Button x:Name="PauseButton"
-                        Style="{StaticResource IconButtonStyle}"
-                        Content="&#xE769;"
-                        Command="{Binding PauseCommand}"
-                        ToolTip="暂停"
-                        AutomationProperties.Name="暂停" />
-                <Button x:Name="StopButton"
-                        Style="{StaticResource IconButtonStyle}"
-                        Content="&#xE71A;"
-                        Command="{Binding StopCommand}"
-                        ToolTip="停止"
-                        AutomationProperties.Name="停止" />
-                <Button x:Name="PreviousButton"
-                        Style="{StaticResource IconButtonStyle}"
-                        Content="&#xE892;"
-                        Command="{Binding PreviousCommand}"
-                        ToolTip="上一项"
-                        AutomationProperties.Name="上一项" />
-                <Button x:Name="NextButton"
-                        Style="{StaticResource IconButtonStyle}"
-                        Content="&#xE893;"
-                        Command="{Binding NextCommand}"
-                        ToolTip="下一项"
-                        AutomationProperties.Name="下一项" />
-                <ComboBox Width="110"
-                          Margin="4"
-                          ItemsSource="{Binding AudioTracks}"
-                          SelectedItem="{Binding SelectedAudioTrack, Mode=TwoWay}"
-                          DisplayMemberPath="Name"
-                          ToolTip="音轨" />
-                <ComboBox Width="110"
-                          Margin="4"
-                          ItemsSource="{Binding SubtitleTracks}"
-                          SelectedItem="{Binding SelectedSubtitleTrack, Mode=TwoWay}"
-                          DisplayMemberPath="Name"
-                          ToolTip="字幕轨" />
-                <Button x:Name="CloseSubtitleButton"
-                        Style="{StaticResource IconButtonStyle}"
-                        Content="&#xE8BA;"
-                        Command="{Binding CloseSubtitleCommand}"
-                        ToolTip="关闭字幕"
-                        AutomationProperties.Name="关闭字幕" />
-                <Button x:Name="AddSubtitleButton"
-                        Style="{StaticResource IconButtonStyle}"
-                        Content="&#xED1E;"
-                        Click="AddSubtitle_Click"
-                        ToolTip="添加字幕"
-                        AutomationProperties.Name="添加字幕" />
-                <Button x:Name="ScreenshotButton"
-                        Style="{StaticResource IconButtonStyle}"
-                        Content="&#xE722;"
-                        Command="{Binding ScreenshotCommand}"
-                        ToolTip="截图"
-                        AutomationProperties.Name="截图" />
-                <Slider x:Name="SeekSlider"
-                        Width="220"
-                        Minimum="0"
-                        IsMoveToPointEnabled="True"
-                        Maximum="{Binding Duration.TotalSeconds, Mode=OneWay}"
-                        Value="{Binding PendingSeekPosition, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                        PreviewMouseLeftButtonDown="SeekSlider_PreviewMouseLeftButtonDown"
-                        PreviewMouseLeftButtonUp="SeekSlider_PreviewMouseLeftButtonUp"
-                        LostMouseCapture="SeekSlider_LostMouseCapture"
-                        PreviewKeyDown="SeekSlider_PreviewKeyDown"
-                        PreviewKeyUp="SeekSlider_PreviewKeyUp" />
-                <TextBlock Foreground="{DynamicResource PrimaryTextBrush}"
-                           VerticalAlignment="Center">
-                    <Run Text="{Binding Position}" /><Run Text=" / " /><Run Text="{Binding Duration}" />
-                </TextBlock>
-                <Slider Width="120"
-                        Minimum="0"
-                        Maximum="100"
-                        Value="{Binding Volume}" />
-                <Button x:Name="MuteButton"
-                        Style="{StaticResource IconButtonStyle}"
-                        Content="&#xE74F;"
-                        Command="{Binding ToggleMuteCommand}"
-                        ToolTip="静音/取消静音"
-                        AutomationProperties.Name="静音或取消静音" />
-                <TextBlock Text="{Binding Rate, StringFormat={}{0:0.00}x}"
-                           Foreground="{DynamicResource PrimaryTextBrush}"
-                           VerticalAlignment="Center" />
-            </WrapPanel>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid x:Name="SeekGroup" Margin="6,0,6,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Slider x:Name="SeekSlider"
+                            Minimum="0"
+                            IsMoveToPointEnabled="True"
+                            Maximum="{Binding Duration.TotalSeconds, Mode=OneWay}"
+                            Value="{Binding PendingSeekPosition, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                            PreviewMouseLeftButtonDown="SeekSlider_PreviewMouseLeftButtonDown"
+                            PreviewMouseLeftButtonUp="SeekSlider_PreviewMouseLeftButtonUp"
+                            LostMouseCapture="SeekSlider_LostMouseCapture"
+                            PreviewKeyDown="SeekSlider_PreviewKeyDown"
+                            PreviewKeyUp="SeekSlider_PreviewKeyUp" />
+                    <TextBlock Grid.Column="1"
+                               Margin="12,0,4,0"
+                               Foreground="{DynamicResource PrimaryTextBrush}"
+                               VerticalAlignment="Center">
+                        <Run Text="{Binding Position}" /><Run Text=" / " /><Run Text="{Binding Duration}" />
+                    </TextBlock>
+                </Grid>
+
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="OpenButton"
+                                Style="{StaticResource IconButtonStyle}"
+                                Content="&#xE8E5;"
+                                Click="Open_Click"
+                                ToolTip="打开视频"
+                                AutomationProperties.Name="打开视频" />
+                        <Button x:Name="AddSubtitleButton"
+                                Style="{StaticResource IconButtonStyle}"
+                                Content="&#xED1E;"
+                                Click="AddSubtitle_Click"
+                                ToolTip="添加字幕"
+                                AutomationProperties.Name="添加字幕" />
+                        <Button x:Name="ScreenshotButton"
+                                Style="{StaticResource IconButtonStyle}"
+                                Content="&#xE722;"
+                                Command="{Binding ScreenshotCommand}"
+                                ToolTip="截图"
+                                AutomationProperties.Name="截图" />
+                    </StackPanel>
+
+                    <StackPanel x:Name="PlaybackGroup"
+                                Grid.Column="1"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Center">
+                        <Button x:Name="PreviousButton"
+                                Style="{StaticResource IconButtonStyle}"
+                                Content="&#xE892;"
+                                Command="{Binding PreviousCommand}"
+                                ToolTip="上一项"
+                                AutomationProperties.Name="上一项" />
+                        <Button x:Name="PlayButton"
+                                Style="{StaticResource IconButtonStyle}"
+                                Content="&#xE768;"
+                                Command="{Binding PlayCommand}"
+                                ToolTip="播放"
+                                AutomationProperties.Name="播放" />
+                        <Button x:Name="PauseButton"
+                                Style="{StaticResource IconButtonStyle}"
+                                Content="&#xE769;"
+                                Command="{Binding PauseCommand}"
+                                ToolTip="暂停"
+                                AutomationProperties.Name="暂停" />
+                        <Button x:Name="StopButton"
+                                Style="{StaticResource IconButtonStyle}"
+                                Content="&#xE71A;"
+                                Command="{Binding StopCommand}"
+                                ToolTip="停止"
+                                AutomationProperties.Name="停止" />
+                        <Button x:Name="NextButton"
+                                Style="{StaticResource IconButtonStyle}"
+                                Content="&#xE893;"
+                                Command="{Binding NextCommand}"
+                                ToolTip="下一项"
+                                AutomationProperties.Name="下一项" />
+                    </StackPanel>
+
+                    <StackPanel x:Name="TrackToolsGroup"
+                                Grid.Column="2"
+                                Orientation="Horizontal">
+                        <ComboBox Width="105"
+                                  Margin="4"
+                                  ItemsSource="{Binding AudioTracks}"
+                                  SelectedItem="{Binding SelectedAudioTrack, Mode=TwoWay}"
+                                  DisplayMemberPath="Name"
+                                  ToolTip="音轨"
+                                  AutomationProperties.Name="音轨" />
+                        <ComboBox Width="105"
+                                  Margin="4"
+                                  ItemsSource="{Binding SubtitleTracks}"
+                                  SelectedItem="{Binding SelectedSubtitleTrack, Mode=TwoWay}"
+                                  DisplayMemberPath="Name"
+                                  ToolTip="字幕轨"
+                                  AutomationProperties.Name="字幕轨" />
+                        <Button x:Name="CloseSubtitleButton"
+                                Style="{StaticResource IconButtonStyle}"
+                                Content="&#xE8BA;"
+                                Command="{Binding CloseSubtitleCommand}"
+                                ToolTip="关闭字幕"
+                                AutomationProperties.Name="关闭字幕" />
+                        <Slider Width="100"
+                                Margin="6,0"
+                                Minimum="0"
+                                Maximum="100"
+                                Value="{Binding Volume}" />
+                        <Button x:Name="MuteButton"
+                                Style="{StaticResource IconButtonStyle}"
+                                Content="&#xE74F;"
+                                Command="{Binding ToggleMuteCommand}"
+                                ToolTip="静音/取消静音"
+                                AutomationProperties.Name="静音或取消静音" />
+                        <TextBlock Text="{Binding Rate, StringFormat={}{0:0.00}x}"
+                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                   VerticalAlignment="Center"
+                                   Margin="4,0" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
         </Border>
     </Grid>
 </UserControl>

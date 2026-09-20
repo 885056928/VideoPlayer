@@ -169,6 +169,20 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OpenFile_Click(object sender, RoutedEventArgs e)
+    {
+        await OpenFileAsync();
+    }
+
+    private async void OpenFolder_Click(object sender, RoutedEventArgs e)
+    {
+        await OpenFolderAsync();
+    }
+
+    private async void TogglePlaylist_Click(object sender, RoutedEventArgs e)
+    {
+        await TogglePlaylistAsync();
+    }
     private async Task OpenFileAsync()
     {
         var dialog = new OpenFileDialog
@@ -210,13 +224,15 @@ public partial class MainWindow : Window
             ? Visibility.Visible
             : Visibility.Collapsed;
         PlaylistColumn.Width = visible
-            ? new GridLength(300)
+            ? new GridLength(320)
             : new GridLength(0);
+        UpdatePlaylistToggleVisual(visible);
     }
 
     private void OnFullscreenChanged(bool isFullscreen)
     {
         PlayerView.SetFullscreenMode(isFullscreen);
+        AppHeader.Visibility = isFullscreen ? Visibility.Collapsed : Visibility.Visible;
 
         if (isFullscreen)
         {
@@ -234,8 +250,15 @@ public partial class MainWindow : Window
             ? Visibility.Visible
             : Visibility.Collapsed;
         PlaylistColumn.Width = visible
-            ? new GridLength(300)
+            ? new GridLength(320)
             : new GridLength(0);
+        UpdatePlaylistToggleVisual(visible);
+    }
+
+    private void UpdatePlaylistToggleVisual(bool visible)
+    {
+        TogglePlaylistButton.Content = visible ? "\uE76C" : "\uE76B";
+        TogglePlaylistButton.ToolTip = visible ? "隐藏播放列表" : "显示播放列表";
     }
 
     private static void ApplyTheme(string theme)

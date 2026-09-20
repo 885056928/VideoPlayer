@@ -5,19 +5,73 @@
              Drop="OnDrop"
              PreviewKeyDown="OnPreviewKeyDown"
              DragOver="OnDragOver">
+    <UserControl.Resources>
+        <Style x:Key="PlaylistIconButtonStyle" TargetType="{x:Type Button}">
+            <Setter Property="Width" Value="32" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="2,0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+            <Setter Property="FontSize" Value="14" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource ControlHoverBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource ControlBorderBrush}" />
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource ControlPressedBrush}" />
+                </Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                    <Setter Property="BorderThickness" Value="2" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
     <Grid Background="{DynamicResource BackgroundBrush}">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
+            <RowDefinition Height="42" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
+            <RowDefinition Height="44" />
         </Grid.RowDefinitions>
-        <TextBlock Text="播放列表"
-                   Foreground="{DynamicResource PrimaryTextBrush}"
-                   Margin="10"
-                   FontSize="16"
-                   FontWeight="SemiBold" />
+
+        <Border Background="{DynamicResource SurfaceBrush}"
+                BorderBrush="{DynamicResource ControlBorderBrush}"
+                BorderThickness="0,0,0,1">
+            <Grid Margin="10,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="&#xEA37;"
+                           FontFamily="Segoe MDL2 Assets"
+                           FontSize="15"
+                           Foreground="{DynamicResource AccentBrush}"
+                           VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1"
+                           Text="播放列表"
+                           Foreground="{DynamicResource PrimaryTextBrush}"
+                           FontSize="14"
+                           FontWeight="SemiBold"
+                           Margin="8,0,0,0"
+                           VerticalAlignment="Center" />
+                <TextBlock x:Name="PlaylistCountText"
+                           Grid.Column="2"
+                           Text="{Binding Items.Count, StringFormat=({0})}"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+
         <Grid Grid.Row="1">
-            <ListBox ItemsSource="{Binding Items}"
+            <ListBox x:Name="PlaylistListBox"
+                     ItemsSource="{Binding Items}"
                      SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
                      MouseDoubleClick="OnPlaylistDoubleClick"
                      Background="Transparent"
@@ -28,36 +82,103 @@
                      VirtualizingPanel.IsVirtualizing="True"
                      VirtualizingPanel.VirtualizationMode="Recycling"
                      ScrollViewer.CanContentScroll="True">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="{x:Type ListBoxItem}">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="Margin" Value="0" />
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="BorderThickness" Value="0" />
+                        <Style.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource ControlHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource ControlHoverBrush}" />
+                            </Trigger>
+                        </Style.Triggers>
+                    </Style>
+                </ListBox.ItemContainerStyle>
                 <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <StackPanel Orientation="Horizontal" Margin="4,2">
-                            <TextBlock Text="▶"
-                                       Margin="4,0"
-                                       Foreground="{DynamicResource AccentBrush}">
-                                <TextBlock.Style>
-                                    <Style TargetType="{x:Type TextBlock}">
-                                        <Setter Property="Visibility" Value="Collapsed" />
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                        <Border x:Name="PlaylistItemRoot"
+                                Margin="6,3"
+                                Padding="6"
+                                CornerRadius="5"
+                                BorderThickness="1"
+                                BorderBrush="Transparent">
+                            <Border.Style>
+                                <Style TargetType="{x:Type Border}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                            <Setter Property="Background" Value="#171F2B" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <Grid x:Name="PlaylistItemLayout">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="64"
+                                        Height="36"
+                                        CornerRadius="4"
+                                        Background="#070707"
+                                        BorderBrush="{DynamicResource ControlBorderBrush}"
+                                        BorderThickness="1">
+                                    <TextBlock Text="&#xE714;"
+                                               FontFamily="Segoe MDL2 Assets"
+                                               FontSize="18"
+                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel Grid.Column="1"
+                                            Margin="10,0,8,0"
+                                            VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding FileName}"
+                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Duration, StringFormat={}{0:hh\:mm\:ss}}"
+                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                               FontSize="11"
+                                               Margin="0,3,0,0">
+                                        <TextBlock.Style>
+                                            <Style TargetType="{x:Type TextBlock}">
                                                 <Setter Property="Visibility" Value="Visible" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
-                            <TextBlock Text="{Binding FileName}" Padding="2,2">
-                                <TextBlock.Style>
-                                    <Style TargetType="{x:Type TextBlock}">
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsCurrent}" Value="True">
-                                                <Setter Property="FontWeight" Value="SemiBold" />
-                                                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
-                        </StackPanel>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Duration}" Value="{x:Null}">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </StackPanel>
+                                <TextBlock Grid.Column="2"
+                                           Text="&#xE768;"
+                                           FontFamily="Segoe MDL2 Assets"
+                                           Foreground="{DynamicResource AccentBrush}"
+                                           VerticalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="{x:Type TextBlock}">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
+                        </Border>
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>
@@ -78,12 +199,29 @@
                 </TextBlock.Style>
             </TextBlock>
         </Grid>
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="10">
-            <Button Content="删除"
-                    Command="{Binding RemoveCommand}"
-                    CommandParameter="{Binding SelectedItem}"
-                    Margin="0,0,8,0" />
-            <Button Content="清空" Command="{Binding ClearCommand}" />
-        </StackPanel>
+
+        <Border Grid.Row="2"
+                Background="{DynamicResource SurfaceBrush}"
+                BorderBrush="{DynamicResource ControlBorderBrush}"
+                BorderThickness="0,1,0,0">
+            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Margin="6,0">
+                <Button x:Name="DeletePlaylistItemButton"
+                        Style="{StaticResource PlaylistIconButtonStyle}"
+                        Content="&#xE74D;"
+                        Command="{Binding RemoveCommand}"
+                        CommandParameter="{Binding SelectedItem}"
+                        ToolTip="从播放列表删除"
+                        AutomationProperties.Name="从播放列表删除" />
+                <Button x:Name="ClearPlaylistButton"
+                        Style="{StaticResource PlaylistIconButtonStyle}"
+                        Content="&#xE894;"
+                        Command="{Binding ClearCommand}"
+                        ToolTip="清空播放列表"
+                        AutomationProperties.Name="清空播放列表" />
+            </StackPanel>
+        </Border>
     </Grid>
 </UserControl>
