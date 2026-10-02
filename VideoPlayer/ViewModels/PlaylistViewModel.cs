@@ -10,21 +10,11 @@ namespace VideoPlayer.ViewModels;
 
 public sealed partial class PlaylistViewModel : ObservableObject
 {
+    #region 属性
     private const int BulkReplaceThreshold = 128;
     private readonly IPlaylistService _playlistService;
     private readonly IUiDispatcher _uiDispatcher;
     private readonly BulkObservableCollection<PlaylistItem> _items = [];
-
-    public PlaylistViewModel(IPlaylistService playlistService, IUiDispatcher uiDispatcher)
-    {
-        ArgumentNullException.ThrowIfNull(playlistService);
-        ArgumentNullException.ThrowIfNull(uiDispatcher);
-
-        _playlistService = playlistService;
-        _uiDispatcher = uiDispatcher;
-        _playlistService.PlaylistChanged += OnPlaylistChanged;
-        _playlistService.CurrentChanged += OnPlaylistChanged;
-    }
 
     public ObservableCollection<PlaylistItem> Items => _items;
 
@@ -35,6 +25,40 @@ public sealed partial class PlaylistViewModel : ObservableObject
 
     [ObservableProperty]
     private string _lastError = string.Empty;
+    #endregion
+
+    #region 命令
+    [RelayCommand]
+    public async Task RemoveAsync(PlaylistItem? item)
+    {
+        if (item is null)
+        {
+            return;
+        }
+
+        var result = await _playlistService.RemoveAsync(item.FilePath);
+        LastError = result.IsSuccess ? string.Empty : result.UserMessage;
+    }
+
+    [RelayCommand]
+    public async Task ClearAsync()
+    {
+        var result = await _playlistService.ClearAsync();
+        LastError = result.IsSuccess ? string.Empty : result.UserMessage;
+    }
+    #endregion
+
+    #region 方法
+    public PlaylistViewModel(IPlaylistService playlistService, IUiDispatcher uiDispatcher)
+    {
+        ArgumentNullException.ThrowIfNull(playlistService);
+        ArgumentNullException.ThrowIfNull(uiDispatcher);
+
+        _playlistService = playlistService;
+        _uiDispatcher = uiDispatcher;
+        _playlistService.PlaylistChanged += OnPlaylistChanged;
+        _playlistService.CurrentChanged += OnPlaylistChanged;
+    }
 
     public async Task<ServiceResult<IReadOnlyList<PlaylistItem>>> AddPathsAsync(
         IEnumerable<string> paths,
@@ -62,25 +86,6 @@ public sealed partial class PlaylistViewModel : ObservableObject
             cancellationToken);
         LastError = result.IsSuccess ? string.Empty : result.UserMessage;
         return result;
-    }
-
-    [RelayCommand]
-    public async Task RemoveAsync(PlaylistItem? item)
-    {
-        if (item is null)
-        {
-            return;
-        }
-
-        var result = await _playlistService.RemoveAsync(item.FilePath);
-        LastError = result.IsSuccess ? string.Empty : result.UserMessage;
-    }
-
-    [RelayCommand]
-    public async Task ClearAsync()
-    {
-        var result = await _playlistService.ClearAsync();
-        LastError = result.IsSuccess ? string.Empty : result.UserMessage;
     }
 
     public void RequestPlay(PlaylistItem? item)
@@ -153,4 +158,5 @@ public sealed partial class PlaylistViewModel : ObservableObject
             SelectedItem = null;
         }
     }
+    #endregion
 }

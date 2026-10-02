@@ -15,6 +15,7 @@ namespace VideoPlayer.ViewModels;
 
 public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 {
+    #region 属性
     private readonly IPlayerService _playerService;
     private readonly IUiDispatcher _dispatcher;
     private readonly ISubtitleService? _subtitleService;
@@ -36,9 +37,9 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     private CancellationTokenSource? _historyCts;
     private Task? _historyTask;
     private CancellationTokenSource? _requestCts;
-    private long _lastSavedPositionTicks;
     private int _disposed;
     private int _navigationVersion;
+    private int _activeNavigationVersion;
     private long _activeSessionId;
     private long _startedSessionId = -1;
     private long _handledEndSessionId = -1;
@@ -49,81 +50,6 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     private bool _isApplyingSnapshot;
     private bool _isUpdatingTracks;
     private int _screenshotMessageVersion;
-
-    public PlayerViewModel(IPlayerService playerService, IUiDispatcher dispatcher)
-        : this(playerService, dispatcher, null, null, null, null, null)
-    {
-    }
-
-    public PlayerViewModel(
-        IPlayerService playerService,
-        IUiDispatcher dispatcher,
-        ISubtitleService? subtitleService)
-        : this(playerService, dispatcher, null, null, null, subtitleService, null)
-    {
-    }
-
-    public PlayerViewModel(
-        IPlayerService playerService,
-        IPlaylistService playlistService,
-        ISettingsService settingsService,
-        IDialogService dialogService,
-        ISubtitleService? subtitleService = null,
-        IHistoryService? historyService = null,
-        IScreenshotService? screenshotService = null)
-        : this(
-            playerService,
-            InlineUiDispatcher.Instance,
-            playlistService,
-            settingsService,
-            dialogService,
-            subtitleService,
-            historyService,
-            screenshotService)
-    {
-    }
-
-    internal PlayerViewModel(
-        IPlayerService playerService,
-        IUiDispatcher dispatcher,
-        IPlaylistService? playlistService,
-        ISettingsService? settingsService,
-        IDialogService? dialogService,
-        ISubtitleService? subtitleService = null,
-        IHistoryService? historyService = null,
-        IScreenshotService? screenshotService = null)
-    {
-        ArgumentNullException.ThrowIfNull(playerService);
-        ArgumentNullException.ThrowIfNull(dispatcher);
-
-        _playerService = playerService;
-        _dispatcher = dispatcher;
-        _subtitleService = subtitleService;
-        _playlistService = playlistService;
-        _settingsService = settingsService;
-        _dialogService = dialogService;
-        _historyService = historyService;
-        _screenshotService = screenshotService;
-        _playerService.StateChanged += OnStateChanged;
-        _playerService.EndReached += OnEndReached;
-        _playerService.TracksChanged += OnTracksChanged;
-        _playerService.MediaParsed += OnMediaParsed;
-        _playerService.PlaybackFailed += OnPlaybackFailed;
-
-        if (_settingsService is not null)
-        {
-            _isApplyingSnapshot = true;
-            try
-            {
-                Volume = _settingsService.Current.Player.DefaultVolume;
-                Rate = _settingsService.Current.Player.DefaultPlaybackRate;
-            }
-            finally
-            {
-                _isApplyingSnapshot = false;
-            }
-        }
-    }
 
     public MediaPlayer? MediaPlayer => _playerService.MediaPlayer;
 
@@ -187,6 +113,10 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 
     public bool HasScreenshotMessage => !string.IsNullOrWhiteSpace(ScreenshotMessage);
 
+    private bool IsDisposed => Volatile.Read(ref _disposed) != 0;
+    #endregion
+
+    #region 命令
     [RelayCommand]
     public Task<ServiceResult> OpenAsync(
         string filePath,
@@ -205,7 +135,11 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         {
             var result = await _playerService.PlayAsync(cancellationToken);
             LastError = result.IsSuccess ? string.Empty : result.UserMessage;
-            if (!result.IsSuccess)
+            if (result.IsSuccess)
+            {
+                RestartHistoryFlushForActiveMedia(playbackRequested: true);
+            }
+            else
             {
                 PlaybackState = VideoPlayer.Enums.PlaybackState.Error;
                 await ShowErrorAsync("播放失败", result.UserMessage);
@@ -226,10 +160,16 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         => RunOnUiAsync(
             async () =>
             {
-                var result = PlaybackState == VideoPlayer.Enums.PlaybackState.Playing
+                // 等待期间状态回调可能更新界面，按本次命令的分支决定是否恢复历史循环。
+                var wasPlaying = PlaybackState == VideoPlayer.Enums.PlaybackState.Playing;
+                var result = wasPlaying
                     ? await _playerService.PauseAsync(cancellationToken)
                     : await _playerService.PlayAsync(cancellationToken);
                 LastError = result.IsSuccess ? string.Empty : result.UserMessage;
+                if (result.IsSuccess && !wasPlaying)
+                {
+                    RestartHistoryFlushForActiveMedia(playbackRequested: true);
+                }
             },
             cancellationToken);
     [RelayCommand]
@@ -276,8 +216,9 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
                 LastError = "截图已取消。";
                 ClearScreenshotMessage();
             }
-            catch
+            catch (Exception exception)
             {
+                LogNonCriticalFailure(exception, "Failed to capture screenshot.");
                 LastError = "截图失败。";
                 ClearScreenshotMessage();
             }
@@ -342,109 +283,6 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
                 await RefreshTracksAsync();
             }
         }, CancellationToken.None);
-    }
-
-    public Task RefreshTracksAsync(CancellationToken cancellationToken = default)
-        => RunOnUiAsync(async () =>
-        {
-            var audio = await _playerService.GetTracksAsync(
-                PlayerTrackType.Audio,
-                cancellationToken);
-            var subtitles = await _playerService.GetTracksAsync(
-                PlayerTrackType.Subtitle,
-                cancellationToken);
-            if (!audio.IsSuccess || !subtitles.IsSuccess)
-            {
-                var failure = !audio.IsSuccess ? audio : subtitles;
-                LastError = failure.UserMessage;
-                return;
-            }
-
-            var tracks = new List<PlayerTrackInfo>();
-            if (audio.Value is not null)
-            {
-                tracks.AddRange(audio.Value);
-            }
-
-            if (subtitles.Value is not null)
-            {
-                tracks.AddRange(subtitles.Value);
-            }
-
-            ApplyTracks(tracks);
-        }, cancellationToken);
-
-    public async Task RequestFramePreviewAsync(TimeSpan position)
-    {
-        HoverTimeText = TimeTextHelper.Format(position);
-        var mediaPath = _activeMediaPath;
-        var sessionId = Interlocked.Read(ref _activeSessionId);
-        if (mediaPath is null || Duration <= TimeSpan.Zero)
-        {
-            HoverPreviewPath = null;
-            return;
-        }
-
-        var clamped = PlaybackMath.ClampPosition(position, Duration);
-        var previewPosition = SeekHoverMath.QuantizeForPreview(clamped, Duration);
-        var previewTick = (long)Math.Round(
-            previewPosition.TotalSeconds * 5,
-            MidpointRounding.AwayFromZero);
-        if (previewTick == Interlocked.Read(ref _lastPreviewTick)
-            && !string.IsNullOrWhiteSpace(HoverPreviewPath))
-        {
-            return;
-        }
-
-        Interlocked.Exchange(ref _lastPreviewTick, previewTick);
-        var cts = new CancellationTokenSource();
-        var previous = Interlocked.Exchange(ref _framePreviewCts, cts);
-        previous?.Cancel();
-        previous?.Dispose();
-
-        try
-        {
-            await Task.Delay(100, cts.Token).ConfigureAwait(false);
-            var previewDirectory = Path.Combine(
-                Path.GetTempPath(),
-                "VideoPlayer",
-                "Previews");
-            var fileName = Math.Abs(mediaPath.GetHashCode()).ToString("X8")
-                + "_"
-                + previewTick.ToString(
-                    System.Globalization.CultureInfo.InvariantCulture)
-                + ".png";
-            var outputPath = Path.Combine(previewDirectory, fileName);
-            var result = await _playerService.CapturePreviewFrameAsync(
-                mediaPath,
-                previewPosition,
-                outputPath,
-                cts.Token).ConfigureAwait(false);
-
-            if (result.IsSuccess
-                && !cts.IsCancellationRequested
-                && sessionId == Interlocked.Read(ref _activeSessionId)
-                && string.Equals(mediaPath, _activeMediaPath, StringComparison.OrdinalIgnoreCase))
-            {
-                await ApplyUiAsync(() => HoverPreviewPath = result.Value).ConfigureAwait(false);
-            }
-            else
-            {
-                Interlocked.Exchange(ref _lastPreviewTick, -1);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception exception)
-        {
-            LogHistoryFailure(exception, "Failed to capture frame preview.");
-        }
-    }
-
-    public void CancelFramePreview()
-    {
-        _framePreviewCts?.Cancel();
     }
     [RelayCommand]
     public Task SeekAsync(CancellationToken cancellationToken = default)
@@ -564,12 +402,207 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             CancellationToken.None);
     }
 
+    [RelayCommand]
+    public Task ToggleMuteAsync(CancellationToken cancellationToken = default)
+        => RunOnUiAsync(async () =>
+        {
+            IsMuted = !IsMuted;
+            var result = await _playerService.SetMuteAsync(IsMuted, cancellationToken);
+            LastError = result.IsSuccess ? string.Empty : result.UserMessage;
+        }, cancellationToken);
+    #endregion
+
+    #region 方法
+    public PlayerViewModel(IPlayerService playerService, IUiDispatcher dispatcher)
+        : this(playerService, dispatcher, null, null, null, null, null)
+    {
+    }
+
+    public PlayerViewModel(
+        IPlayerService playerService,
+        IUiDispatcher dispatcher,
+        ISubtitleService? subtitleService)
+        : this(playerService, dispatcher, null, null, null, subtitleService, null)
+    {
+    }
+
+    public PlayerViewModel(
+        IPlayerService playerService,
+        IPlaylistService playlistService,
+        ISettingsService settingsService,
+        IDialogService dialogService,
+        ISubtitleService? subtitleService = null,
+        IHistoryService? historyService = null,
+        IScreenshotService? screenshotService = null)
+        : this(
+            playerService,
+            InlineUiDispatcher.Instance,
+            playlistService,
+            settingsService,
+            dialogService,
+            subtitleService,
+            historyService,
+            screenshotService)
+    {
+    }
+
+    internal PlayerViewModel(
+        IPlayerService playerService,
+        IUiDispatcher dispatcher,
+        IPlaylistService? playlistService,
+        ISettingsService? settingsService,
+        IDialogService? dialogService,
+        ISubtitleService? subtitleService = null,
+        IHistoryService? historyService = null,
+        IScreenshotService? screenshotService = null)
+    {
+        ArgumentNullException.ThrowIfNull(playerService);
+        ArgumentNullException.ThrowIfNull(dispatcher);
+
+        _playerService = playerService;
+        _dispatcher = dispatcher;
+        _subtitleService = subtitleService;
+        _playlistService = playlistService;
+        _settingsService = settingsService;
+        _dialogService = dialogService;
+        _historyService = historyService;
+        _screenshotService = screenshotService;
+        _playerService.StateChanged += OnStateChanged;
+        _playerService.EndReached += OnEndReached;
+        _playerService.TracksChanged += OnTracksChanged;
+        _playerService.MediaParsed += OnMediaParsed;
+        _playerService.PlaybackFailed += OnPlaybackFailed;
+
+        if (_settingsService is not null)
+        {
+            _isApplyingSnapshot = true;
+            try
+            {
+                Volume = _settingsService.Current.Player.DefaultVolume;
+                Rate = _settingsService.Current.Player.DefaultPlaybackRate;
+            }
+            finally
+            {
+                _isApplyingSnapshot = false;
+            }
+        }
+    }
+
+    public Task RefreshTracksAsync(CancellationToken cancellationToken = default)
+        => RunOnUiAsync(async () =>
+        {
+            var audio = await _playerService.GetTracksAsync(
+                PlayerTrackType.Audio,
+                cancellationToken);
+            var subtitles = await _playerService.GetTracksAsync(
+                PlayerTrackType.Subtitle,
+                cancellationToken);
+            if (!audio.IsSuccess || !subtitles.IsSuccess)
+            {
+                var failure = !audio.IsSuccess ? audio : subtitles;
+                LastError = failure.UserMessage;
+                return;
+            }
+
+            var tracks = new List<PlayerTrackInfo>();
+            if (audio.Value is not null)
+            {
+                tracks.AddRange(audio.Value);
+            }
+
+            if (subtitles.Value is not null)
+            {
+                tracks.AddRange(subtitles.Value);
+            }
+
+            ApplyTracks(tracks);
+        }, cancellationToken);
+
+    public async Task RequestFramePreviewAsync(TimeSpan position)
+    {
+        HoverTimeText = TimeTextHelper.Format(position);
+        var mediaPath = _activeMediaPath;
+        var sessionId = Interlocked.Read(ref _activeSessionId);
+        if (mediaPath is null || Duration <= TimeSpan.Zero)
+        {
+            HoverPreviewPath = null;
+            return;
+        }
+
+        var clamped = PlaybackMath.ClampPosition(position, Duration);
+        var previewPosition = SeekHoverMath.QuantizeForPreview(clamped, Duration);
+        var previewTick = (long)Math.Round(
+            previewPosition.TotalSeconds * 5,
+            MidpointRounding.AwayFromZero);
+        if (previewTick == Interlocked.Read(ref _lastPreviewTick)
+            && !string.IsNullOrWhiteSpace(HoverPreviewPath))
+        {
+            return;
+        }
+
+        Interlocked.Exchange(ref _lastPreviewTick, previewTick);
+        var cts = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _framePreviewCts, cts);
+        previous?.Cancel();
+        previous?.Dispose();
+
+        try
+        {
+            await Task.Delay(100, cts.Token).ConfigureAwait(false);
+            var previewDirectory = Path.Combine(
+                Path.GetTempPath(),
+                "VideoPlayer",
+                "Previews");
+            var fileName = Math.Abs(mediaPath.GetHashCode()).ToString("X8")
+                + "_"
+                + previewTick.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture)
+                + ".png";
+            var outputPath = Path.Combine(previewDirectory, fileName);
+            var result = await _playerService.CapturePreviewFrameAsync(
+                mediaPath,
+                previewPosition,
+                outputPath,
+                cts.Token).ConfigureAwait(false);
+
+            if (result.IsSuccess
+                && !cts.IsCancellationRequested
+                && sessionId == Interlocked.Read(ref _activeSessionId)
+                && string.Equals(mediaPath, _activeMediaPath, StringComparison.OrdinalIgnoreCase))
+            {
+                await ApplyUiAsync(() => HoverPreviewPath = result.Value).ConfigureAwait(false);
+            }
+            else
+            {
+                Interlocked.Exchange(ref _lastPreviewTick, -1);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // 移开鼠标或新预览取代旧请求属于正常取消，不显示播放错误。
+        }
+        catch (Exception exception)
+        {
+            LogNonCriticalFailure(exception, "Failed to capture frame preview.");
+        }
+    }
+
+    public void CancelFramePreview()
+    {
+        _framePreviewCts?.Cancel();
+    }
+
     public async Task<ServiceResult> HandleEndReachedAsync(EndReachedEventArgs args)
     {
         ArgumentNullException.ThrowIfNull(args);
 
+        var navigationVersion = Volatile.Read(ref _navigationVersion);
         var activeSessionId = Interlocked.Read(ref _activeSessionId);
-        if (args.MediaSessionId != activeSessionId
+        // 仅在替代请求尚未激活时忽略旧结束事件，当前会话的打开收尾不影响正常结束。
+        if (IsNavigationSuperseded(navigationVersion)
+            || (Volatile.Read(ref _requestCts) is not null
+                && Volatile.Read(ref _activeNavigationVersion) != navigationVersion)
+            || args.MediaSessionId != activeSessionId
             || Interlocked.Exchange(ref _handledEndSessionId, args.MediaSessionId)
                 == args.MediaSessionId)
         {
@@ -581,6 +614,13 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 
         await FlushHistoryAsync();
 
+        // 保存历史期间用户可能已切换媒体，或发起尚未完成的新请求；两者都使旧事件失效。
+        if (IsNavigationSuperseded(navigationVersion)
+            || args.MediaSessionId != Interlocked.Read(ref _activeSessionId))
+        {
+            return CreateSupersededResult();
+        }
+
         var snapshot = _playerService.Snapshot;
         if (_historyService?.IsAvailable == true
             && snapshot.MediaSessionId == args.MediaSessionId
@@ -588,15 +628,20 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         {
             try
             {
-                await _historyService.MarkCompletedAsync(
+                var completed = await _historyService.MarkCompletedAsync(
                     snapshot.MediaPath,
                     snapshot.Duration,
                     args.MediaSessionId,
                     CancellationToken.None);
+                if (!completed.IsSuccess)
+                {
+                    LogNonCriticalFailure(completed.Exception,
+                        "Failed to mark playback completed: {TechnicalMessage}", completed.TechnicalMessage);
+                }
             }
             catch (Exception exception)
             {
-                LogHistoryFailure(exception, "Failed to mark playback completed.");
+                LogNonCriticalFailure(exception, "Failed to mark playback completed.");
             }
         }
 
@@ -605,7 +650,17 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             return ServiceResult.Success();
         }
 
-        return await NextAsync();
+        return await RunOnUiAsync(() =>
+        {
+            // 完成标记和 UI 调度也会等待，必须在实际导航前再次确认，避免覆盖用户的新选择。
+            if (IsNavigationSuperseded(navigationVersion)
+                || args.MediaSessionId != Interlocked.Read(ref _activeSessionId))
+            {
+                return Task.FromResult(CreateSupersededResult());
+            }
+
+            return NextAsync();
+        }, CancellationToken.None);
     }
 
     public void BeginSeek() => BeginSeek(Position);
@@ -637,15 +692,6 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             Duration);
         return SeekToAsync(target, cancellationToken);
     }
-
-    [RelayCommand]
-    public Task ToggleMuteAsync(CancellationToken cancellationToken = default)
-        => RunOnUiAsync(async () =>
-        {
-            IsMuted = !IsMuted;
-            var result = await _playerService.SetMuteAsync(IsMuted, cancellationToken);
-            LastError = result.IsSuccess ? string.Empty : result.UserMessage;
-        }, cancellationToken);
 
     public Task StartProgressRefreshAsync(CancellationToken cancellationToken = default)
         => StartProgressRefreshCoreAsync(null, cancellationToken);
@@ -775,7 +821,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             }
             catch (Exception exception)
             {
-                LogHistoryFailure(exception, "Failed to query playback history.");
+                LogNonCriticalFailure(exception, "Failed to query playback history.");
             }
         }
 
@@ -804,7 +850,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             }
             catch (Exception exception)
             {
-                LogHistoryFailure(exception, "Failed to find an automatic subtitle.");
+                LogNonCriticalFailure(exception, "Failed to find an automatic subtitle.");
             }
         }
 
@@ -866,6 +912,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         Interlocked.Exchange(ref _startedSessionId, -1);
         Interlocked.Exchange(ref _handledEndSessionId, -1);
         Interlocked.Exchange(ref _handledFailureSessionId, -1);
+        Volatile.Write(ref _activeNavigationVersion, navigationVersion);
         var targetVolume = Volume;
         var targetRate = Rate;
         var activeSnapshot = _playerService.Snapshot;
@@ -1141,9 +1188,11 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            // 取消是循环正常退出信号，避免把媒体切换或关闭记录为故障。
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogNonCriticalFailure(exception, "Failed to refresh playback progress.");
             await UpdateLastErrorAsync("播放进度更新失败。");
         }
     }
@@ -1184,8 +1233,9 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
                 await PersistSettingsSafelyAsync();
             }
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogNonCriticalFailure(exception, "Failed to apply playback volume.");
             await UpdateLastErrorAsync("音量设置失败。");
         }
     }
@@ -1203,8 +1253,9 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
                 await PersistSettingsSafelyAsync();
             }
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogNonCriticalFailure(exception, "Failed to apply playback rate.");
             await UpdateLastErrorAsync("速率设置失败。");
         }
     }
@@ -1230,8 +1281,9 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
                 }
             });
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogNonCriticalFailure(exception, "Failed to clear screenshot notification.");
         }
     }
 
@@ -1253,14 +1305,17 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
                 }
             });
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogNonCriticalFailure(exception, "Failed to update playback error notification.");
         }
     }
 
-    private void RestartHistoryFlushForActiveMedia()
+    private void RestartHistoryFlushForActiveMedia(bool playbackRequested = false)
     {
-        if (IsDisposed || _historyService?.IsAvailable != true || _activeSessionId <= 0)
+        // 重复播放命令不能重置正在运行的循环，否则会持续推迟下一次保存。
+        if (IsDisposed || _historyService?.IsAvailable != true || _activeSessionId <= 0
+            || Volatile.Read(ref _historyTask) is { IsCompleted: false })
         {
             return;
         }
@@ -1268,15 +1323,17 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         try
         {
             var snapshot = _playerService.Snapshot;
+            // 播放成功返回时原生状态仍可能是 Stopped，不等待状态回调才恢复定时保存。
             if (snapshot.MediaPath is not null
-                && snapshot.State is PlaybackState.Playing or PlaybackState.Paused)
+                && snapshot.MediaSessionId == Interlocked.Read(ref _activeSessionId)
+                && (playbackRequested || snapshot.State is PlaybackState.Playing or PlaybackState.Paused))
             {
                 StartHistoryFlush();
             }
         }
         catch (Exception exception)
         {
-            LogHistoryFailure(exception, "Failed to restart playback history persistence.");
+            LogNonCriticalFailure(exception, "Failed to restart playback history persistence.");
         }
     }
 
@@ -1295,16 +1352,18 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         Interlocked.Exchange(ref _historyCts, historyCts);
         Interlocked.Exchange(
             ref _historyTask,
-            RunHistoryFlushAsync(historyCts.Token));
-        Interlocked.Exchange(ref _lastSavedPositionTicks, 0);
+            RunHistoryFlushAsync(Interlocked.Read(ref _activeSessionId), historyCts.Token));
     }
 
-    private async Task RunHistoryFlushAsync(CancellationToken cancellationToken)
+    private async Task RunHistoryFlushAsync(long mediaSessionId, CancellationToken cancellationToken)
     {
+        // 进度标记归本循环所有，取消后迟到的旧写入不能污染新会话的保存阈值。
+        long lastSavedTicks = 0;
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
         try
         {
-            while (await timer.WaitForNextTickAsync(cancellationToken))
+            // 快照和历史保存不操作 UI，避免回到 UI 上下文执行可能阻塞的数据库调用。
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
                 if (IsDisposed
                     || _settingsService is null
@@ -1316,9 +1375,10 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 
                 var snapshot = _playerService.Snapshot;
                 cancellationToken.ThrowIfCancellationRequested();
-                var lastSavedTicks = Interlocked.Read(ref _lastSavedPositionTicks);
                 var positionTicks = snapshot.Position.Ticks;
                 if (snapshot.MediaPath is null
+                    || snapshot.MediaSessionId != mediaSessionId
+                    || mediaSessionId != Interlocked.Read(ref _activeSessionId)
                     || Math.Abs(positionTicks - lastSavedTicks) < PositionSaveThresholdTicks)
                 {
                     continue;
@@ -1326,19 +1386,30 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 
                 var result = await _historyService!
                     .SaveProgressAsync(snapshot, cancellationToken)
-                    ;
+                    .ConfigureAwait(false);
                 if (result.IsSuccess)
                 {
-                    Interlocked.Exchange(ref _lastSavedPositionTicks, positionTicks);
+                    lastSavedTicks = positionTicks;
+                }
+                else if (result.ErrorCode == ErrorCode.Cancelled && cancellationToken.IsCancellationRequested)
+                {
+                    // 历史服务可能将调用方取消转换为结果，此时同样按正常退出处理。
+                    return;
+                }
+                else
+                {
+                    LogNonCriticalFailure(result.Exception,
+                        "Failed to persist playback progress: {TechnicalMessage}", result.TechnicalMessage);
                 }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            // 取消是循环正常退出信号，避免把媒体切换或关闭记录为故障。
         }
         catch (Exception exception)
         {
-            LogHistoryFailure(exception, "Failed to persist playback progress.");
+            LogNonCriticalFailure(exception, "Failed to persist playback progress.");
         }
     }
 
@@ -1353,12 +1424,14 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
             {
                 await historyTask.WaitAsync(HistoryFlushTimeout);
             }
-            catch (TimeoutException)
+            catch (TimeoutException exception)
             {
+                // 达到退出边界后继续最终保存，同时保留旧循环未及时退出的诊断。
+                LogNonCriticalFailure(exception, "Timed out stopping the history flush loop.");
             }
             catch (Exception exception)
             {
-                LogHistoryFailure(exception, "Failed to stop the history flush loop.");
+                LogNonCriticalFailure(exception, "Failed to stop the history flush loop.");
             }
         }
 
@@ -1374,16 +1447,21 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await _historyService.FlushAsync(flushCts.Token)
-                .WaitAsync(HistoryFlushTimeout)
-                ;
+            var result = await _historyService.FlushAsync(flushCts.Token)
+                .WaitAsync(HistoryFlushTimeout);
+            if (!result.IsSuccess)
+            {
+                LogNonCriticalFailure(result.Exception,
+                    "Failed to flush playback history: {TechnicalMessage}", result.TechnicalMessage);
+            }
         }
-        catch (TimeoutException)
+        catch (TimeoutException exception)
         {
+            LogNonCriticalFailure(exception, "Timed out flushing playback history.");
         }
         catch (Exception exception)
         {
-            LogHistoryFailure(exception, "Failed to flush playback history.");
+            LogNonCriticalFailure(exception, "Failed to flush playback history.");
         }
     }
 
@@ -1407,7 +1485,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception exception)
         {
-            LogHistoryFailure(exception, "Failed to read the final playback snapshot.");
+            LogNonCriticalFailure(exception, "Failed to read the final playback snapshot.");
             return;
         }
 
@@ -1418,16 +1496,21 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await historyService.SaveProgressAsync(snapshot, cancellationToken)
-                .WaitAsync(HistoryFlushTimeout)
-                ;
+            var result = await historyService.SaveProgressAsync(snapshot, cancellationToken)
+                .WaitAsync(HistoryFlushTimeout);
+            if (!result.IsSuccess)
+            {
+                LogNonCriticalFailure(result.Exception,
+                    "Failed to save final playback progress: {TechnicalMessage}", result.TechnicalMessage);
+            }
         }
-        catch (TimeoutException)
+        catch (TimeoutException exception)
         {
+            LogNonCriticalFailure(exception, "Timed out saving final playback progress.");
         }
         catch (Exception exception)
         {
-            LogHistoryFailure(exception, "Failed to save final playback progress.");
+            LogNonCriticalFailure(exception, "Failed to save final playback progress.");
         }
     }
 
@@ -1455,15 +1538,16 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private static void LogHistoryFailure(Exception exception, string message)
+    private static void LogNonCriticalFailure(Exception? exception, string message, params object?[] propertyValues)
     {
         try
         {
-            Log.Warning(exception, message);
+            Log.Warning(exception, message, propertyValues);
         }
-        catch
+        catch (Exception loggingException)
         {
-            // History failures must never affect playback.
+            // 日志本身失败时使用内部诊断，避免递归记录并影响播放。
+            Serilog.Debugging.SelfLog.WriteLine("Failed to log playback failure: {0}; original failure: {1}", loggingException, exception);
         }
     }
 
@@ -1488,9 +1572,11 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
+            // 主动停止刷新产生的取消由本方法消费，后续仍释放取消资源。
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogNonCriticalFailure(exception, "Failed to stop the playback progress loop.");
         }
         finally
         {
@@ -1521,9 +1607,10 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
                 ApplyTracks(tracks);
             });
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            // Track updates are non-critical and must not affect playback.
+            // 音轨刷新失败只记录诊断，不中断当前播放。
+            LogNonCriticalFailure(exception, "Failed to dispatch playback track updates.");
         }
     }
 
@@ -1582,7 +1669,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception exception)
         {
-            LogHistoryFailure(exception, "Failed to record playback start.");
+            LogNonCriticalFailure(exception, "Failed to record playback start.");
         }
     }
 
@@ -1631,7 +1718,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception exception)
         {
-            LogHistoryFailure(exception, "Failed to process parsed media information.");
+            LogNonCriticalFailure(exception, "Failed to process parsed media information.");
         }
     }
 
@@ -1672,7 +1759,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception exception)
         {
-            LogHistoryFailure(exception, "Failed to process playback failure.");
+            LogNonCriticalFailure(exception, "Failed to process playback failure.");
         }
     }
 
@@ -1684,7 +1771,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception exception)
         {
-            LogHistoryFailure(exception, "Failed to handle end reached.");
+            LogNonCriticalFailure(exception, "Failed to handle end reached.");
         }
     }
 
@@ -1761,8 +1848,6 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
 
     private bool IsSuperseded(int? navigationVersion)
         => navigationVersion is int value && IsNavigationSuperseded(value);
-
-    private bool IsDisposed => Volatile.Read(ref _disposed) != 0;
     private sealed class InlineUiDispatcher : IUiDispatcher
     {
         public static InlineUiDispatcher Instance { get; } = new();
@@ -1780,4 +1865,5 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
         public Task<T> InvokeAsync<T>(Func<T> action)
             => Task.FromResult(action());
     }
+    #endregion
 }

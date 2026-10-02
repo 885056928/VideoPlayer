@@ -12,6 +12,7 @@ public sealed class SettingsService : ISettingsService
 {
     private readonly AppPaths _paths;
     private readonly ISettingsFileOperations _fileOperations;
+    private readonly SemaphoreSlim _saveGate = new(1, 1);
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -119,8 +120,12 @@ public sealed class SettingsService : ISettingsService
         CancellationToken cancellationToken)
     {
         var tempPath = _paths.ConfigPath + ".tmp";
+        var gateAcquired = false;
         try
         {
+            // 临时文件、替换和清理属于同一次保存，必须完整串行以免互相覆盖。
+            await _saveGate.WaitAsync(cancellationToken);
+            gateAcquired = true;
             cancellationToken.ThrowIfCancellationRequested();
             _paths.EnsureCoreDirectories();
             Current = SettingsValidator.Normalize(Current);
@@ -163,13 +168,21 @@ public sealed class SettingsService : ISettingsService
         }
         finally
         {
-            try
+            // 尚未取得保存权限的取消请求不能删除其他请求正在使用的临时文件。
+            if (gateAcquired)
             {
-                _fileOperations.Delete(tempPath);
-            }
-            catch
-            {
-                // Cleanup is best-effort; the save result must remain non-fatal.
+                try
+                {
+                    _fileOperations.Delete(tempPath);
+                }
+                catch (Exception exception)
+                {
+                    Log.Warning(exception, "Failed to clean up temporary configuration file {Path}.", tempPath);
+                }
+                finally
+                {
+                    _saveGate.Release();
+                }
             }
         }
     }
@@ -187,8 +200,10 @@ public sealed class SettingsService : ISettingsService
         {
             throw;
         }
-        catch
+        catch (Exception exception)
         {
+            // 当前文件不可读时仍尝试备份或默认值，但必须保留原始失败位置和原因。
+            Log.Warning(exception, "Failed to read configuration file {Path}; trying backup or defaults.", path);
             return null;
         }
     }

@@ -5,6 +5,20 @@ namespace VideoPlayer.ViewModels;
 
 public sealed partial class MainViewModel : ObservableObject
 {
+    #region 属性
+    public PlayerViewModel Player { get; }
+
+    public PlaylistViewModel Playlist { get; }
+
+    public VideoInfoViewModel VideoInfo { get; }
+
+    public ISettingsService Settings { get; }
+    #endregion
+
+    #region 命令
+    #endregion
+
+    #region 方法
     public MainViewModel(
         PlayerViewModel player,
         PlaylistViewModel playlist,
@@ -18,14 +32,6 @@ public sealed partial class MainViewModel : ObservableObject
         Player.MediaParsed += OnMediaParsed;
     }
 
-    public PlayerViewModel Player { get; }
-
-    public PlaylistViewModel Playlist { get; }
-
-    public VideoInfoViewModel VideoInfo { get; }
-
-    public ISettingsService Settings { get; }
-
     private async void OnMediaParsed(object? sender, Models.Events.MediaParsedEventArgs e)
     {
         try
@@ -37,4 +43,5 @@ public sealed partial class MainViewModel : ObservableObject
             Serilog.Log.Warning(exception, "Failed to refresh media information.");
         }
     }
+    #endregion
 }

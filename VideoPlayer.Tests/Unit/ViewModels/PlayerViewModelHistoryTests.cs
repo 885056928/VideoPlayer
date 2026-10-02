@@ -100,7 +100,7 @@ public sealed class PlayerViewModelHistoryTests
 
         player.RaiseStateChanged(PlaybackState.Playing);
 
-        await Task.Delay(50);
+        // 本测试的调度器和历史服务同步完成回调，事件返回后即可检查去重结果。
         Assert.Equal(1, history.StartPlaybackCallCount);
     }
 

@@ -1,0 +1,14 @@
+# Visual Studio 本地状态
+.vs/
+*.user
+*.suo
+
+# .NET 构建与测试输出
+[Bb]in/
+[Oo]bj/
+TestResults/
+
+# 发布文件、验收证据与本地运行输出
+/artifacts/
+*.log
+*.dmp

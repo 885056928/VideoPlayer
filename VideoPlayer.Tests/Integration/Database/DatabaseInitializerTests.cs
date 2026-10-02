@@ -90,6 +90,75 @@ public sealed class DatabaseInitializerTests
     }
 
     [Fact]
+    public async Task InitializeAsync_WhenCancelled_PreservesHealthyDatabase()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        try
+        {
+            var paths = new AppPaths(root);
+            var initializer = new DatabaseInitializer(paths);
+            Assert.True((await initializer.InitializeAsync()).IsSuccess);
+            var originalDatabase = await File.ReadAllBytesAsync(paths.DatabasePath);
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+
+            var result = await initializer.InitializeAsync(cancellation.Token);
+
+            Assert.False(result.IsSuccess);
+            Assert.True(File.Exists(paths.DatabasePath));
+            Assert.Empty(Directory.GetFiles(root, "VideoPlayer.corrupt.*.db"));
+            Assert.Equal(originalDatabase, await File.ReadAllBytesAsync(paths.DatabasePath));
+            Assert.Equal(ErrorCode.Cancelled, result.ErrorCode);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WhenMigrationConflicts_PreservesExistingRecords()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        try
+        {
+            var paths = new AppPaths(root);
+            paths.EnsureCoreDirectories();
+            var connectionString = new SqliteConnectionStringBuilder
+            {
+                DataSource = paths.DatabasePath,
+                Pooling = false
+            }.ToString();
+            await using (var connection = new SqliteConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                // 合法数据库中的表结构冲突属于迁移失败，不能因此重建并丢失已有记录。
+                command.CommandText = "CREATE TABLE PlaybackHistory (Id INTEGER PRIMARY KEY, FileName TEXT);"
+                    + "INSERT INTO PlaybackHistory VALUES (1, 'keep.mp4');";
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var result = await new DatabaseInitializer(paths).InitializeAsync();
+
+            Assert.False(result.IsSuccess);
+            Assert.Equal(ErrorCode.DatabaseUnavailable, result.ErrorCode);
+            Assert.Empty(Directory.GetFiles(root, "VideoPlayer.corrupt.*.db"));
+            await using var verificationConnection = new SqliteConnection(connectionString);
+            await verificationConnection.OpenAsync();
+            await using var verificationCommand = verificationConnection.CreateCommand();
+            verificationCommand.CommandText = "SELECT FileName FROM PlaybackHistory WHERE Id = 1";
+            Assert.Equal("keep.mp4", await verificationCommand.ExecuteScalarAsync());
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public async Task InitializeAsync_RecoversCorruptDatabase()
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

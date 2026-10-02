@@ -51,6 +51,8 @@ public sealed class FakePlayerService : IPlayerService
     { get; set; }
     public int OpenCount { get; private set; }
     public int PlayCallCount { get; private set; }
+    public Func<int, CancellationToken, Task<ServiceResult>>? SetVolumeHandler { get; set; }
+    public Func<double, CancellationToken, Task<ServiceResult>>? SetRateHandler { get; set; }
     public int PauseCallCount { get; private set; }
     public Func<string, TimeSpan, string, CancellationToken, Task<ServiceResult<string>>>? PreviewHandler { get; set; }
     public ServiceResult<IReadOnlyList<PlayerTrackInfo>> TracksResult { get; set; } =
@@ -71,7 +73,8 @@ public sealed class FakePlayerService : IPlayerService
     public LibVLCSharp.Shared.MediaPlayer? MediaPlayer => null;
     public bool IsInitialized => true;
     public bool HasMedia => true;
-    public PlaybackSnapshot Snapshot => new(
+    public PlaybackSnapshot? SnapshotOverride { get; set; }
+    public PlaybackSnapshot Snapshot => SnapshotOverride ?? new(
         _sessionId,
         PlaybackState.Playing,
         "a.mp4",
@@ -178,11 +181,11 @@ public sealed class FakePlayerService : IPlayerService
     public Task<ServiceResult> SeekAsync(TimeSpan position, CancellationToken cancellationToken = default)
         => Task.FromResult(ServiceResult.Success());
     public Task<ServiceResult> SetVolumeAsync(int volume, CancellationToken cancellationToken = default)
-        => Task.FromResult(ServiceResult.Success());
+        => SetVolumeHandler?.Invoke(volume, cancellationToken) ?? Task.FromResult(ServiceResult.Success());
     public Task<ServiceResult> SetMuteAsync(bool isMuted, CancellationToken cancellationToken = default)
         => Task.FromResult(ServiceResult.Success());
     public Task<ServiceResult> SetRateAsync(double rate, CancellationToken cancellationToken = default)
-        => Task.FromResult(ServiceResult.Success());
+        => SetRateHandler?.Invoke(rate, cancellationToken) ?? Task.FromResult(ServiceResult.Success());
     public Task<ServiceResult<IReadOnlyList<PlayerTrackInfo>>> GetTracksAsync(
         PlayerTrackType type,
         CancellationToken cancellationToken = default)
@@ -292,6 +295,7 @@ public sealed class FakePlayerService : IPlayerService
 
 public sealed class FakeScreenshotService : IScreenshotService
 {
+    public Func<PlaybackSnapshot, CancellationToken, Task<ServiceResult<string>>>? CaptureHandler { get; set; }
     public ServiceResult<string> CaptureResult { get; set; } =
         ServiceResult<string>.Success("screenshot.png");
     public int CaptureCount { get; private set; }
@@ -303,7 +307,7 @@ public sealed class FakeScreenshotService : IScreenshotService
     {
         CaptureCount++;
         LastSnapshot = snapshot;
-        return Task.FromResult(CaptureResult);
+        return CaptureHandler?.Invoke(snapshot, cancellationToken) ?? Task.FromResult(CaptureResult);
     }
 }
 
@@ -477,6 +481,13 @@ public sealed class FakeHistoryService : IHistoryService
 
     public int FlushCallCount { get; private set; }
 
+    public Func<CancellationToken, Task<ServiceResult>>? StartPlaybackHandler { get; set; }
+
+    public Func<PlaybackSnapshot, CancellationToken, Task<ServiceResult>>? SaveProgressHandler { get; set; }
+
+    public Func<string, TimeSpan, long, CancellationToken, Task<ServiceResult>>? MarkCompletedHandler { get; set; }
+    public Func<CancellationToken, Task<ServiceResult>>? FlushHandler { get; set; }
+
     public Task<ServiceResult<ResumeInfo?>> GetResumeInfoAsync(
         string filePath,
         CancellationToken cancellationToken = default)
@@ -490,7 +501,8 @@ public sealed class FakeHistoryService : IHistoryService
         CancellationToken cancellationToken = default)
     {
         StartPlaybackCallCount++;
-        return Task.FromResult(ServiceResult.Success());
+        return StartPlaybackHandler?.Invoke(cancellationToken)
+            ?? Task.FromResult(ServiceResult.Success());
     }
 
     public Task<ServiceResult> SaveProgressAsync(
@@ -498,7 +510,8 @@ public sealed class FakeHistoryService : IHistoryService
         CancellationToken cancellationToken = default)
     {
         SaveProgressCallCount++;
-        return Task.FromResult(ServiceResult.Success());
+        return SaveProgressHandler?.Invoke(snapshot, cancellationToken)
+            ?? Task.FromResult(ServiceResult.Success());
     }
 
     public Task<ServiceResult> MarkCompletedAsync(
@@ -506,7 +519,8 @@ public sealed class FakeHistoryService : IHistoryService
         TimeSpan duration,
         long mediaSessionId = 0,
         CancellationToken cancellationToken = default)
-        => Task.FromResult(ServiceResult.Success());
+        => MarkCompletedHandler?.Invoke(filePath, duration, mediaSessionId, cancellationToken)
+            ?? Task.FromResult(ServiceResult.Success());
 
     public Task<ServiceResult> ClearCompletedAsync(
         string filePath,
@@ -520,6 +534,6 @@ public sealed class FakeHistoryService : IHistoryService
     public Task<ServiceResult> FlushAsync(CancellationToken cancellationToken = default)
     {
         FlushCallCount++;
-        return Task.FromResult(ServiceResult.Success());
+        return FlushHandler?.Invoke(cancellationToken) ?? Task.FromResult(ServiceResult.Success());
     }
 }

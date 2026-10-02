@@ -6,15 +6,10 @@ namespace VideoPlayer.ViewModels;
 
 public sealed partial class VideoInfoViewModel : ObservableObject
 {
+    #region 属性
     private const string Unknown = "未知";
 
     private readonly IMediaInfoService _mediaInfoService;
-
-    public VideoInfoViewModel(IMediaInfoService mediaInfoService)
-    {
-        ArgumentNullException.ThrowIfNull(mediaInfoService);
-        _mediaInfoService = mediaInfoService;
-    }
 
     [ObservableProperty]
     private string _fileName = Unknown;
@@ -48,6 +43,17 @@ public sealed partial class VideoInfoViewModel : ObservableObject
 
     [ObservableProperty]
     private string _errorMessage = string.Empty;
+    #endregion
+
+    #region 命令
+    #endregion
+
+    #region 方法
+    public VideoInfoViewModel(IMediaInfoService mediaInfoService)
+    {
+        ArgumentNullException.ThrowIfNull(mediaInfoService);
+        _mediaInfoService = mediaInfoService;
+    }
 
     public async Task RefreshAsync(
         PlaybackSnapshot snapshot,
@@ -58,8 +64,7 @@ public sealed partial class VideoInfoViewModel : ObservableObject
         ArgumentNullException.ThrowIfNull(tracks);
 
         var result = await _mediaInfoService
-            .GetCurrentMediaInfoAsync(snapshot, tracks, cancellationToken)
-;
+            .GetCurrentMediaInfoAsync(snapshot, tracks, cancellationToken);
         if (!result.IsSuccess || result.Value is null)
         {
             ApplyUnknown();
@@ -136,4 +141,5 @@ public sealed partial class VideoInfoViewModel : ObservableObject
             _ => $"{bytes} B"
         };
     }
+    #endregion
 }
