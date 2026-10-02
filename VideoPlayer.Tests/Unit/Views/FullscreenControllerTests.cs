@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Windows;
+using System.Windows.Shell;
 using VideoPlayer.Views;
 using Xunit;
 
@@ -30,6 +32,47 @@ public sealed class FullscreenControllerTests
         controller.Toggle();
 
         Assert.Equal([true, false], states);
+    }
+
+    [WpfTheory]
+    [InlineData(WindowState.Normal)]
+    [InlineData(WindowState.Maximized)]
+    public void Toggle_CustomChromeIsRemovedDuringFullscreenAndRestoredOnExit(WindowState originalState)
+    {
+        var window = new Window
+        {
+            WindowState = originalState,
+            Left = 10,
+            Top = 20,
+            Width = 800,
+            Height = 600
+        };
+        var chrome = new WindowChrome
+        {
+            CaptionHeight = 36,
+            GlassFrameThickness = new Thickness(0),
+            ResizeBorderThickness = new Thickness(6)
+        };
+        WindowChrome.SetWindowChrome(window, chrome);
+        var controller = new FullscreenController(window);
+        try
+        {
+            controller.Enter();
+            // 全屏不能保留标题命中区或按任务栏工作区裁剪的自绘窗口框架。
+            Assert.Null(WindowChrome.GetWindowChrome(window));
+            Assert.Equal(WindowStyle.None, window.WindowStyle);
+            Assert.Equal(ResizeMode.NoResize, window.ResizeMode);
+
+            controller.Exit();
+            Assert.Same(chrome, WindowChrome.GetWindowChrome(window));
+            Assert.Equal(originalState, window.WindowState);
+            Assert.Equal(800, window.Width);
+            Assert.Equal(600, window.Height);
+        }
+        finally
+        {
+            window.Close();
+        }
     }
 
     [WpfFact]

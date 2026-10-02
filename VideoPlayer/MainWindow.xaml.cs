@@ -1,7 +1,10 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Shell;
 using Microsoft.Win32;
 using Serilog;
 using VideoPlayer.Enums;
@@ -14,8 +17,13 @@ namespace VideoPlayer;
 
 public partial class MainWindow : Window
 {
+    private const int ResizeFrameWidthMetric = 32;
+    private const int ResizeFrameHeightMetric = 33;
+    private const int PaddedBorderMetric = 92;
     private readonly MainViewModel _viewModel;
     private readonly FullscreenController _fullscreenController;
+    private readonly FrameworkElement _videoOverlayRoot;
+    private Window? _videoOverlayWindow;
     private bool _shutdownStarted;
     private bool _allowClose;
     private bool _viewDisposed;
@@ -27,6 +35,9 @@ public partial class MainWindow : Window
         InitializeComponent();
         _viewModel = viewModel;
         _fullscreenController = new FullscreenController(this, OnFullscreenChanged);
+        _videoOverlayRoot = (FrameworkElement)PlayerView.FindName("OverlayRoot");
+        _videoOverlayRoot.Loaded += VideoOverlay_Loaded;
+        _videoOverlayRoot.Unloaded += VideoOverlay_Unloaded;
         DataContext = viewModel;
         PreviewKeyDown += MainWindow_PreviewKeyDown;
         AllowDrop = true;
@@ -35,7 +46,54 @@ public partial class MainWindow : Window
         _viewModel.Playlist.PlayRequested += Playlist_PlayRequested;
         ApplyPlaylistVisibility(_viewModel.Settings.Current.UI.ShowPlaylist);
         ApplyTheme(_viewModel.Settings.Current.UI.Theme);
+        UpdateWindowChromeLayout();
     }
+
+    protected override void OnStateChanged(EventArgs e)
+    {
+        UpdateWindowChromeLayout();
+        base.OnStateChanged(e);
+    }
+
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+        UpdateWindowChromeLayout();
+    }
+
+    private void UpdateWindowChromeLayout()
+    {
+        var chrome = WindowChrome.GetWindowChrome(this);
+        if (chrome is null)
+        {
+            RootLayout.Margin = new Thickness(0);
+            return;
+        }
+
+        // 普通最大化外框含隐藏系统边框，内容向内补偿；全屏移除 Chrome 后不保留边距。
+        var inset = WindowState == WindowState.Maximized
+            ? GetMaximizedWindowInset()
+            : new Thickness(0);
+        RootLayout.Margin = inset;
+        // 标题命中区覆盖完整可见顶栏，避免最大化补偿后底部变成无法拖动的区域。
+        chrome.CaptionHeight = AppHeader.Height + inset.Top - chrome.ResizeBorderThickness.Top;
+    }
+
+    private Thickness GetMaximizedWindowInset()
+    {
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var horizontalDpi = (uint)Math.Round(dpi.PixelsPerInchX);
+        var verticalDpi = (uint)Math.Round(dpi.PixelsPerInchY);
+        // WPF 的 WindowResizeBorderThickness 不包含系统附加边框，需按当前显示器 DPI 一并计入。
+        var horizontal = (GetSystemMetricsForDpi(ResizeFrameWidthMetric, horizontalDpi)
+            + GetSystemMetricsForDpi(PaddedBorderMetric, horizontalDpi)) / dpi.DpiScaleX;
+        var vertical = (GetSystemMetricsForDpi(ResizeFrameHeightMetric, verticalDpi)
+            + GetSystemMetricsForDpi(PaddedBorderMetric, verticalDpi)) / dpi.DpiScaleY;
+        return new Thickness(horizontal, vertical, horizontal, vertical);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetricsForDpi(int index, uint dpi);
 
     protected override async void OnClosing(CancelEventArgs e)
     {
@@ -71,6 +129,9 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         PreviewKeyDown -= MainWindow_PreviewKeyDown;
+        _videoOverlayRoot.Loaded -= VideoOverlay_Loaded;
+        _videoOverlayRoot.Unloaded -= VideoOverlay_Unloaded;
+        DetachVideoOverlayEvents();
         PreviewDragOver -= MainWindow_PreviewDragOver;
         PreviewDrop -= MainWindow_PreviewDrop;
         _viewModel.Playlist.PlayRequested -= Playlist_PlayRequested;
@@ -78,22 +139,68 @@ public partial class MainWindow : Window
         base.OnClosed(e);
     }
 
-    private async void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    private void VideoOverlay_Loaded(object sender, RoutedEventArgs e)
     {
-        if (Keyboard.FocusedElement is TextBoxBase)
+        DetachVideoOverlayEvents();
+        var overlayWindow = Window.GetWindow(_videoOverlayRoot);
+        if (overlayWindow is null || ReferenceEquals(overlayWindow, this))
         {
             return;
         }
 
+        // LibVLC 浮层属于独立窗口，复用主窗输入处理，保留视频区快捷键与文件拖放。
+        _videoOverlayWindow = overlayWindow;
+        _videoOverlayWindow.PreviewKeyDown += MainWindow_PreviewKeyDown;
+        _videoOverlayWindow.AllowDrop = AllowDrop;
+        _videoOverlayWindow.PreviewDragOver += MainWindow_PreviewDragOver;
+        _videoOverlayWindow.PreviewDrop += MainWindow_PreviewDrop;
+    }
+
+    private void VideoOverlay_Unloaded(object sender, RoutedEventArgs e)
+        => DetachVideoOverlayEvents();
+
+    private void DetachVideoOverlayEvents()
+    {
+        if (_videoOverlayWindow is not null)
+        {
+            _videoOverlayWindow.PreviewKeyDown -= MainWindow_PreviewKeyDown;
+            _videoOverlayWindow.PreviewDragOver -= MainWindow_PreviewDragOver;
+            _videoOverlayWindow.PreviewDrop -= MainWindow_PreviewDrop;
+            _videoOverlayWindow = null;
+        }
+    }
+
+    private async void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         var action = ShortcutService.Resolve(key, Keyboard.Modifiers);
+        // 输入框继续独占文本编辑按键，但全屏退出不能被输入焦点阻挡。
+        if (Keyboard.FocusedElement is TextBoxBase
+            && action is not (ShortcutAction.ToggleFullscreen or ShortcutAction.ExitFullscreen))
+        {
+            return;
+        }
+
         if (!ShouldHandleShortcut(action, _fullscreenController.IsFullscreen))
         {
             return;
         }
 
         e.Handled = true;
-        await ExecuteShortcutAsync(action);
+        // 长按 F11 的自动重复不能连续进出全屏。
+        if (action == ShortcutAction.ToggleFullscreen && e.IsRepeat)
+        {
+            return;
+        }
+
+        try
+        {
+            await ExecuteShortcutAsync(action);
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "Failed to execute keyboard shortcut {ShortcutAction}.", action);
+        }
     }
 
     internal static bool ShouldHandleShortcut(
@@ -168,6 +275,28 @@ public partial class MainWindow : Window
                 break;
         }
     }
+
+    private void MinimizeWindow_Click(object sender, RoutedEventArgs e)
+        => SystemCommands.MinimizeWindow(this);
+
+    private void ToggleFullscreen_Click(object sender, RoutedEventArgs e)
+        => _fullscreenController.Toggle();
+
+    private void ToggleMaximizeWindow_Click(object sender, RoutedEventArgs e)
+    {
+        if (WindowState == WindowState.Maximized)
+        {
+            SystemCommands.RestoreWindow(this);
+        }
+        else
+        {
+            SystemCommands.MaximizeWindow(this);
+        }
+    }
+
+    private void CloseWindow_Click(object sender, RoutedEventArgs e)
+        // 沿用窗口关闭事件中的异步资源释放流程。
+        => SystemCommands.CloseWindow(this);
 
     private async void OpenFile_Click(object sender, RoutedEventArgs e)
     {

@@ -26,14 +26,17 @@ public sealed class PlaybackMathTests
         => Assert.Equal(expected, PlaybackMath.ClampVolume(input));
 
     [Theory]
-    [InlineData(0.1, 0.5)]
+    [InlineData(0.1, 0.25)]
+    [InlineData(0.25, 0.25)]
     [InlineData(0.5, 0.5)]
     [InlineData(1.25, 1.25)]
     [InlineData(2.0, 2.0)]
-    [InlineData(9.0, 2.0)]
+    [InlineData(3.5, 3.5)]
+    [InlineData(5.0, 5.0)]
+    [InlineData(9.0, 5.0)]
     [InlineData(double.NaN, 1.0)]
     [InlineData(double.PositiveInfinity, 1.0)]
     [InlineData(double.NegativeInfinity, 1.0)]
-    public void ClampRate_UsesHalfToDoubleAndFiniteDefault(double input, double expected)
+    public void ClampRate_UsesQuarterToFiveAndFiniteDefault(double input, double expected)
         => Assert.Equal(expected, PlaybackMath.ClampRate(input));
 }

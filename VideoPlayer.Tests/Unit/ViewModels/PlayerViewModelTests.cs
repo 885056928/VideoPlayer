@@ -22,20 +22,23 @@ public sealed class PlayerViewModelTests
         Assert.True(fake.LastRequest.AutoPlay);
     }
 
-    [Fact]
-    public async Task OpenAsync_AppliesInitialVolumeAndRateAfterSuccess()
+    [Theory]
+    [InlineData(0.25)]
+    [InlineData(1.5)]
+    [InlineData(5.0)]
+    public async Task OpenAsync_AppliesInitialVolumeAndRateAfterSuccess(double rate)
     {
         var fake = new FakePlayerService();
         await using var viewModel = CreateViewModel(fake);
         viewModel.Volume = 65;
-        viewModel.Rate = 1.5;
-        await WaitUntilAsync(() => fake.LastVolume == 65 && fake.LastRate == 1.5);
+        viewModel.Rate = rate;
+        await WaitUntilAsync(() => fake.LastVolume == 65 && fake.LastRate == rate);
         fake.ResetMutationTracking();
 
         await viewModel.OpenAsync(@"C:\视频\movie.mp4");
 
         Assert.Equal(65, fake.LastVolume);
-        Assert.Equal(1.5, fake.LastRate);
+        Assert.Equal(rate, fake.LastRate);
         Assert.True(fake.SetVolumeCallCount >= 1);
         Assert.True(fake.SetRateCallCount >= 1);
     }
@@ -358,6 +361,33 @@ public sealed class PlayerViewModelTests
 
         Assert.Equal(1.0, viewModel.Rate);
     }
+
+    [Theory]
+    [InlineData(0.25, false, 0.25)]
+    [InlineData(0.5, false, 0.25)]
+    [InlineData(2.0, true, 2.25)]
+    [InlineData(4.75, true, 5.0)]
+    [InlineData(5.0, true, 5.0)]
+    [InlineData(5.0, false, 4.75)]
+    public async Task RateCommands_KeepQuarterStepsAndClampToExtendedRange(double initial, bool increase, double expected)
+    {
+        var fake = new FakePlayerService();
+        await using var viewModel = CreateViewModel(fake);
+        viewModel.Rate = initial;
+
+        if (increase)
+        {
+            viewModel.RateUp();
+        }
+        else
+        {
+            viewModel.RateDown();
+        }
+
+        Assert.Equal(expected, viewModel.Rate);
+        await WaitUntilAsync(() => fake.LastRate == expected);
+    }
+
     private static PlayerViewModel CreateViewModel(FakePlayerService fake)
         => new(fake, new ImmediateUiDispatcher());
 

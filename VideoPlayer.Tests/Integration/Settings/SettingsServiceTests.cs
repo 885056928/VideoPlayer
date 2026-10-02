@@ -10,6 +10,33 @@ namespace VideoPlayer.Tests.Integration.Settings;
 
 public sealed class SettingsServiceTests
 {
+    [Theory]
+    [InlineData(0.25)]
+    [InlineData(5.0)]
+    public async Task SaveAndLoad_PreserveExtendedPlaybackRate(double rate)
+    {
+        var root = CreateRoot();
+        try
+        {
+            var paths = new AppPaths(root);
+            paths.EnsureCoreDirectories();
+            var service = new SettingsService(paths);
+            service.Current.Player.DefaultPlaybackRate = rate;
+
+            var saved = await service.SaveImmediateAsync();
+            var reloaded = new SettingsService(paths);
+            var loaded = await reloaded.LoadAsync();
+
+            Assert.True(saved.IsSuccess);
+            Assert.True(loaded.IsSuccess);
+            Assert.Equal(rate, reloaded.Current.Player.DefaultPlaybackRate);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
     [Fact]
     public async Task SaveImmediateAsync_CreatesBackupWhenMainExists()
     {

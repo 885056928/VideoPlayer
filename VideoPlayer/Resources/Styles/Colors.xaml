@@ -17,4 +17,6 @@
     <SolidColorBrush x:Key="ControlHoverBrush" Color="#252525" />
     <SolidColorBrush x:Key="ControlPressedBrush" Color="#303030" />
     <SolidColorBrush x:Key="DisabledTextBrush" Color="#686868" />
+    <!-- LibVLC 分层浮窗的全透明像素会穿透鼠标，保留极低透明度以接收控制栏唤醒事件。 -->
+    <SolidColorBrush x:Key="VideoOverlayHitTestBrush" Color="#02000000" />
 </ResourceDictionary>

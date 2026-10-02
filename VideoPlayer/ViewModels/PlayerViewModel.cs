@@ -29,7 +29,14 @@ public sealed partial class PlayerViewModel : ObservableObject, IAsyncDisposable
     private static readonly TimeSpan HistoryFlushTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan ScreenshotSuccessMessageLifetime = TimeSpan.FromSeconds(2);
     private const long PositionSaveThresholdTicks = TimeSpan.TicksPerSecond * 2;
-    private static readonly double[] PlaybackRates = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+    // 扩展范围仍保留每次 0.25 倍的快捷键步长，避免跨过中间倍率。
+    private static readonly double[] PlaybackRates =
+    [
+        0.25, 0.5, 0.75, 1.0, 1.25,
+        1.5, 1.75, 2.0, 2.25, 2.5,
+        2.75, 3.0, 3.25, 3.5, 3.75,
+        4.0, 4.25, 4.5, 4.75, 5.0
+    ];
     private CancellationTokenSource? _progressCts;
     private CancellationTokenSource? _framePreviewCts;
     private long _lastPreviewTick = -1;

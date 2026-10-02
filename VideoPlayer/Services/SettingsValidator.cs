@@ -1,4 +1,5 @@
 using System.IO;
+using VideoPlayer.Helpers;
 using VideoPlayer.Models;
 
 namespace VideoPlayer.Services;
@@ -21,7 +22,8 @@ public static class SettingsValidator
         settings.Screenshot ??= new ScreenshotSettings();
 
         settings.Player.DefaultVolume = Math.Clamp(settings.Player.DefaultVolume, 0, 100);
-        settings.Player.DefaultPlaybackRate = Math.Clamp(settings.Player.DefaultPlaybackRate, 0.5, 2.0);
+        // 配置与播放服务使用同一倍率范围，避免重启后已保存的倍率被重新截断。
+        settings.Player.DefaultPlaybackRate = PlaybackMath.ClampRate(settings.Player.DefaultPlaybackRate);
         settings.Subtitle.Encoding = AllowedEncodings.Contains(settings.Subtitle.Encoding)
             ? settings.Subtitle.Encoding
             : "Auto";

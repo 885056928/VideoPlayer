@@ -89,7 +89,7 @@ public sealed class PlayerServiceCoverageTests
         Assert.True(rate.IsSuccess);
         Assert.Equal(0, snapshot.Volume);
         Assert.True(snapshot.IsMuted);
-        Assert.Equal(2.0, snapshot.Rate);
+        Assert.Equal(4.0, snapshot.Rate);
     }
 
     [Fact]

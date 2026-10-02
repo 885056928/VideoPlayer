@@ -12,9 +12,19 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type RepeatButton}">
-                        <Border Height="6"
+                        <Border x:Name="TrackFill"
+                                Height="6"
                                 CornerRadius="3"
                                 Background="{TemplateBinding Background}" />
+                        <ControlTemplate.Triggers>
+                            <!-- 圆点直径为 18，两段轨道各向圆点内延伸半径 9，让接缝圆角藏在圆点下。 -->
+                            <Trigger Property="Command" Value="{x:Static Slider.DecreaseLarge}">
+                                <Setter TargetName="TrackFill" Property="Margin" Value="0,0,-9,0" />
+                            </Trigger>
+                            <Trigger Property="Command" Value="{x:Static Slider.IncreaseLarge}">
+                                <Setter TargetName="TrackFill" Property="Margin" Value="-9,0,0,0" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -52,14 +62,15 @@
                                                   Background="{DynamicResource AccentBrush}"
                                                   Command="{x:Static Slider.DecreaseLarge}" />
                                 </Track.DecreaseRepeatButton>
-                                <Track.Thumb>
-                                    <Thumb Style="{StaticResource ProgressThumbStyle}" />
-                                </Track.Thumb>
                                 <Track.IncreaseRepeatButton>
                                     <RepeatButton Style="{StaticResource ProgressTrackButtonStyle}"
                                                   Background="{DynamicResource ControlBorderBrush}"
                                                   Command="{x:Static Slider.IncreaseLarge}" />
                                 </Track.IncreaseRepeatButton>
+                                <!-- Track 按子控件添加顺序绘制，圆点最后添加以覆盖两侧延伸的轨道。 -->
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource ProgressThumbStyle}" />
+                                </Track.Thumb>
                             </Track>
                         </Grid>
                     </ControlTemplate>
@@ -150,7 +161,7 @@
                        Grid.Row="0"
                        MediaPlayer="{Binding MediaPlayer}"
                        Background="{DynamicResource BackgroundBrush}">
-            <Grid x:Name="OverlayRoot" Background="Transparent">
+            <Grid x:Name="OverlayRoot" Background="{DynamicResource VideoOverlayHitTestBrush}">
                 <Grid IsHitTestVisible="False">
                     <Border x:Name="EmptyState"
                             HorizontalAlignment="Center"
@@ -328,7 +339,6 @@
                             IsMoveToPointEnabled="True"
                             Maximum="{Binding Duration.TotalSeconds, Mode=OneWay}"
                             Value="{Binding PendingSeekPosition, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                            PreviewMouseLeftButtonDown="SeekSlider_PreviewMouseLeftButtonDown"
                             PreviewMouseLeftButtonUp="SeekSlider_PreviewMouseLeftButtonUp"
                             LostMouseCapture="SeekSlider_LostMouseCapture"
                             PreviewKeyDown="SeekSlider_PreviewKeyDown"

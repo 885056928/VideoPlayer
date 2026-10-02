@@ -45,8 +45,8 @@ case has not yet been executed; it is not a pass result.
 | SC-06 Up | Playing video | Increases volume by 5 and respects the maximum. | Pending | `artifacts/acceptance/evidence/SC-06/` | Pending | Exact unmodified key. |
 | SC-07 Down | Playing video | Decreases volume by 5 and respects the minimum. | Pending | `artifacts/acceptance/evidence/SC-07/` | Pending | Exact unmodified key. |
 | SC-08 M | Playing video | Toggles mute without changing playback. | Pending | `artifacts/acceptance/evidence/SC-08/` | Pending | Exact unmodified key. |
-| SC-09 [ | Playing video | Lowers rate and clamps at 0.5x. | Pending | `artifacts/acceptance/evidence/SC-09/` | Pending | Exact unmodified key. |
-| SC-10 ] | Playing video | Raises rate and clamps at 2.0x. | Pending | `artifacts/acceptance/evidence/SC-10/` | Pending | Exact unmodified key. |
+| SC-09 [ | Playing video | Lowers rate by 0.25x and clamps at 0.25x. | Pending | `artifacts/acceptance/evidence/SC-09/` | Pending | Exact unmodified key; restart preserves the saved 0.25x rate. |
+| SC-10 ] | Playing video | Raises rate by 0.25x and clamps at 5.0x. | Pending | `artifacts/acceptance/evidence/SC-10/` | Pending | Exact unmodified key; restart preserves the saved 5.0x rate. |
 | SC-11 \ | Playing video | Restores rate to 1.0x. | Pending | `artifacts/acceptance/evidence/SC-11/` | Pending | Exact unmodified key. |
 | SC-12 F11 | Playing video | Enters/exits fullscreen in no more than 500 ms. | Pending | `artifacts/acceptance/evidence/SC-12/` | Pending | Exact unmodified key. |
 | SC-13 Esc | Fullscreen video | Exits fullscreen only when fullscreen is active. | Pending | `artifacts/acceptance/evidence/SC-13/` | Pending | Must not close the app from windowed mode. |
@@ -55,7 +55,7 @@ case has not yet been executed; it is not a pass result.
 | SC-16 Ctrl+P | Any state | Shows or hides the playlist. | Pending | `artifacts/acceptance/evidence/SC-16/` | Pending | Exact modifiers. |
 | SC-17 Ctrl+I | Playing video | Opens media information without changing playback state. | Pending | `artifacts/acceptance/evidence/SC-17/` | Pending | Exact modifiers. |
 | SC-18 Ctrl+Alt+S | Playing video | Saves a screenshot without changing playback state, history, or tracks. | Pending | `artifacts/acceptance/evidence/SC-18/` | Pending | Exact modifiers. |
-| UI-FULLSCREEN | Playing video | Fullscreen fills the display, controls auto-hide, Esc restores the prior window, and playback continues. | Pending | `artifacts/acceptance/evidence/UI-FULLSCREEN/` | Pending | Check multi-monitor and borderless behavior. |
+| UI-FULLSCREEN | Playing video | Header button or F11 enters fullscreen; F11/Esc restores prior window bounds/state and playlist visibility. Controls auto-hide and mouse activity wakes them; playback continues. | Pending | `artifacts/acceptance/evidence/UI-FULLSCREEN/` | Pending | Check multi-monitor, normal/maximized entry, video-area focus, text-input focus, playback shortcuts and file drop over video. |
 | UI-TEXT-INPUT | Focus in a text field while pressing shortcut keys | Text entry remains possible; no unintended playback action fires. | Pending | `artifacts/acceptance/evidence/UI-TEXT-INPUT/` | Pending | Shortcut conflict check. |
 
 ## Subtitles, Audio, And Screenshots

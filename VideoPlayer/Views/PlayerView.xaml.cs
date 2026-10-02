@@ -17,6 +17,11 @@ public partial class PlayerView : UserControl, IDisposable
     public PlayerView()
     {
         InitializeComponent();
+        // Slider 的原生点击定位会标记事件已处理，仍需开启定位提交流程。
+        SeekSlider.AddHandler(
+            PreviewMouseLeftButtonDownEvent,
+            new MouseButtonEventHandler(SeekSlider_PreviewMouseLeftButtonDown),
+            handledEventsToo: true);
         DataContextChanged += (_, args) => SeekPreviewPopup.DataContext = args.NewValue;
         SeekPreviewPopup.DataContext = DataContext;
         _controlBarTimer = new DispatcherTimer
@@ -26,6 +31,9 @@ public partial class PlayerView : UserControl, IDisposable
         _controlBarTimer.Tick += ControlBarTimer_Tick;
         PreviewMouseMove += PlayerView_PreviewMouseMove;
         PreviewMouseDown += PlayerView_PreviewMouseDown;
+        // 浮层鼠标事件不会路由到 PlayerView，复用同一唤醒逻辑保持全屏控制栏可用。
+        OverlayRoot.PreviewMouseMove += PlayerView_PreviewMouseMove;
+        OverlayRoot.PreviewMouseDown += PlayerView_PreviewMouseDown;
         Loaded += PlayerView_Loaded;
         Unloaded += PlayerView_Unloaded;
     }
@@ -126,7 +134,7 @@ public partial class PlayerView : UserControl, IDisposable
         }
     }
 
-    private void SeekSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    private async void SeekSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (DataContext is not PlayerViewModel viewModel
             || viewModel.Duration <= TimeSpan.Zero
@@ -135,12 +143,20 @@ public partial class PlayerView : UserControl, IDisposable
             return;
         }
 
-        var pointerX = e.GetPosition(SeekSlider).X;
-        var position = SeekHoverMath.PositionFromRatio(
-            pointerX,
-            SeekSlider.ActualWidth,
-            viewModel.Duration);
-        viewModel.BeginSeek(position);
+        try
+        {
+            // 复用滑块按实际轨道和圆点尺寸计算的值，避免按总宽度重算造成定位偏移。
+            viewModel.BeginSeek(TimeSpan.FromSeconds(SeekSlider.Value));
+            if (e.Handled)
+            {
+                // 原生轨道点击已有目标值，立即提交，移出后松开也不依赖收到 MouseUp。
+                await CommitSeekAsync();
+            }
+        }
+        catch (Exception exception)
+        {
+            Serilog.Log.Warning(exception, "Failed to seek playback from a track click.");
+        }
     }
 
     private async void SeekSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -183,11 +199,7 @@ public partial class PlayerView : UserControl, IDisposable
             pointerX,
             SeekSlider.ActualWidth,
             viewModel.Duration);
-        if (e.LeftButton == MouseButtonState.Pressed)
-        {
-            viewModel.PendingSeekPosition = position.TotalSeconds;
-        }
-
+        // 实际定位由 Slider.Value 双向绑定处理；悬停坐标只用于预览，不能覆盖定位值。
         SeekPreviewPopup.HorizontalOffset = Math.Clamp(
             pointerX - 90,
             0,
@@ -232,6 +244,8 @@ public partial class PlayerView : UserControl, IDisposable
         _controlBarTimer.Tick -= ControlBarTimer_Tick;
         PreviewMouseMove -= PlayerView_PreviewMouseMove;
         PreviewMouseDown -= PlayerView_PreviewMouseDown;
+        OverlayRoot.PreviewMouseMove -= PlayerView_PreviewMouseMove;
+        OverlayRoot.PreviewMouseDown -= PlayerView_PreviewMouseDown;
         Loaded -= PlayerView_Loaded;
         Unloaded -= PlayerView_Unloaded;
         VideoView.Dispose();

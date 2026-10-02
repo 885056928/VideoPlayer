@@ -258,11 +258,14 @@ public sealed class PlayerServiceTests
         await using var service = CreateService();
         var cases = new[]
         {
-            (Input: 0.1, Expected: 0.5),
+            (Input: 0.1, Expected: 0.25),
+            (Input: 0.25, Expected: 0.25),
             (Input: 0.5, Expected: 0.5),
             (Input: 1.25, Expected: 1.25),
             (Input: 2.0, Expected: 2.0),
-            (Input: 9.0, Expected: 2.0),
+            (Input: 3.5, Expected: 3.5),
+            (Input: 5.0, Expected: 5.0),
+            (Input: 9.0, Expected: 5.0),
             (Input: double.NaN, Expected: 1.0),
             (Input: double.PositiveInfinity, Expected: 1.0),
             (Input: double.NegativeInfinity, Expected: 1.0)

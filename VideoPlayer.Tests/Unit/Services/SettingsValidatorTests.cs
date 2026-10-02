@@ -17,8 +17,27 @@ public sealed class SettingsValidatorTests
         var actual = SettingsValidator.Normalize(settings);
 
         Assert.Equal(100, actual.Player.DefaultVolume);
-        Assert.Equal(2.0, actual.Player.DefaultPlaybackRate);
+        Assert.Equal(5.0, actual.Player.DefaultPlaybackRate);
         Assert.Equal("Auto", actual.Subtitle.Encoding);
+    }
+
+    [Theory]
+    [InlineData(0.1, 0.25)]
+    [InlineData(0.25, 0.25)]
+    [InlineData(3.5, 3.5)]
+    [InlineData(5.0, 5.0)]
+    [InlineData(9.0, 5.0)]
+    [InlineData(double.NaN, 1.0)]
+    [InlineData(double.PositiveInfinity, 1.0)]
+    [InlineData(double.NegativeInfinity, 1.0)]
+    public void Normalize_PlaybackRateUsesExtendedRange(double input, double expected)
+    {
+        var settings = AppSettings.CreateDefault();
+        settings.Player.DefaultPlaybackRate = input;
+
+        var actual = SettingsValidator.Normalize(settings);
+
+        Assert.Equal(expected, actual.Player.DefaultPlaybackRate);
     }
 
     [Fact]
