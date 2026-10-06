@@ -3,6 +3,11 @@
 ## Register
 Windows desktop media tool. Dense, dark, playback-first.
 
+## Application identity
+- The application mark is a blue ribbon around a white play triangle on a midnight rounded tile, with a transparent exterior.
+- Use `VideoPlayer/Resources/Icons/VideoPlayer.png` as the master artwork and the 20px header brand.
+- `VideoPlayer.ico` supplies 16, 24, 32, 48, 64, 128 and 256px frames for the executable, window and taskbar. Embed both assets as WPF resources.
+
 ## Icon system
 - Use the built-in `Segoe MDL2 Assets` font for control icons on Windows 10/11.
 - Existing actionable buttons use icon-only content when the icon is universally recognizable.

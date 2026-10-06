@@ -5,6 +5,7 @@
     xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
     xmlns:views="clr-namespace:VideoPlayer.Views"
     Title="VideoPlayer"
+    Icon="/VideoPlayer;component/Resources/Icons/VideoPlayer.ico"
     Width="1180"
     Height="720"
     MinWidth="900"
@@ -78,12 +79,14 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
-                    <TextBlock
+                    <Image
+                        x:Name="HeaderAppIcon"
+                        Width="20"
+                        Height="20"
                         VerticalAlignment="Center"
-                        FontFamily="Segoe MDL2 Assets"
-                        FontSize="16"
-                        Foreground="{DynamicResource AccentBrush}"
-                        Text="&#xE714;" />
+                        IsHitTestVisible="False"
+                        RenderOptions.BitmapScalingMode="HighQuality"
+                        Source="/VideoPlayer;component/Resources/Icons/VideoPlayer.png" />
                     <TextBlock
                         Margin="8,0,0,0"
                         VerticalAlignment="Center"
