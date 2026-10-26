@@ -9,6 +9,10 @@
 TestResults/
 
 # 发布文件、验收证据与本地运行输出
-/artifacts/
+/artifacts/*
+!/artifacts/publish/
+/artifacts/publish/*
+!/artifacts/publish/Publish.ps1
+!/artifacts/publish/Publish.cmd
 *.log
 *.dmp

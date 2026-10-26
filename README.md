@@ -156,7 +156,15 @@ pwsh -NoProfile -File scripts/acceptance/Invoke-Acceptance.ps1
 
 ## 发布
 
-生成 Windows x64 自包含文件夹：
+在 `artifacts/publish/` 中双击 `Publish.cmd` 即可一键生成运行程序和发布压缩包（需要 PowerShell 7 和项目要求的 .NET SDK）。也可在项目根目录执行以下命令；从其他目录调用时使用脚本的绝对路径：
+
+```powershell
+pwsh -NoProfile -File artifacts/publish/Publish.ps1
+```
+
+脚本先调用现有发布流程，再在 `artifacts/publish/` 生成 `VideoPlayer-win-x64-时间戳.zip` 和对应的 `.zip.sha256` 校验文件。重复执行会重新生成 `win-x64/` 运行目录、保留旧压缩包；发布失败立即停止，不会把旧程序误打包为新版本。ZIP 内包含完整的 `win-x64/` 文件夹，解压后运行 `VideoPlayer.exe`。脚本不会自动启动播放器。
+
+仅生成 Windows x64 自包含文件夹时，仍可单独执行：
 
 ```powershell
 pwsh -NoProfile -File scripts/acceptance/Publish-Release.ps1
@@ -164,7 +172,7 @@ pwsh -NoProfile -File scripts/acceptance/Publish-Release.ps1
 
 输出为 `artifacts/publish/win-x64/`，该目录会在发布时重新生成。运行其中的 `VideoPlayer.exe` 即可启动；目标机器无须单独安装 .NET 运行时。分发时应保留整个输出目录，包含 LibVLC 原生库、插件和 `LICENSES/`，不能只复制 EXE。
 
-源码仓库忽略 `bin/`、`obj/`、IDE 缓存、测试结果及 `artifacts/`。可运行的发布文件夹由上述脚本单独生成。
+源码仓库忽略 `bin/`、`obj/`、IDE 缓存、测试结果及 `artifacts/` 下的生成产物，仅将 `artifacts/publish/Publish.ps1`、`Publish.cmd` 两个发布入口纳入版本管理。可通过 `pwsh -NoProfile -File scripts/acceptance/Test-PublishAutomation.ps1` 验证打包、校验文件、重复发布和失败退出行为，该回归检查使用隔离目录，不重复构建播放器。
 
 ## 常见问题
 
