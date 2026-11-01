@@ -14,17 +14,18 @@ namespace VideoPlayer;
 
 public partial class App : Application
 {
-    private static readonly TimeSpan ServiceDisposalTimeout = TimeSpan.FromSeconds(5);
-    private readonly object _shutdownSync = new();
-    private ServiceProvider? _services;
-    private Task? _shutdownTask;
-
     public App()
     {
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
     }
+
+    private static readonly TimeSpan ServiceDisposalTimeout = TimeSpan.FromSeconds(5);
+    private readonly object _shutdownSync = new();
+    private ServiceProvider? _services;
+    private Task? _shutdownTask;
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         try
@@ -56,6 +57,9 @@ public partial class App : Application
             var window = new MainWindow(viewModel);
             MainWindow = window;
             window.Show();
+
+            // 主窗口绑定播放视图后，再处理 Windows“打开方式”传入的完整路径。
+            await viewModel.AddPathsAndPlayFirstAsync(e.Args);
         }
         catch (Exception exception)
         {

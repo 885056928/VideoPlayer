@@ -334,7 +334,7 @@ public partial class MainWindow : Window
 
         if (dialog.ShowDialog(this) == true)
         {
-            await AddPathsAndPlayFirstAsync([dialog.FolderName]);
+            await _viewModel.AddPathsAndPlayFirstAsync([dialog.FolderName]);
         }
     }
 
@@ -428,33 +428,11 @@ public partial class MainWindow : Window
             }
 
             e.Handled = true;
-            await AddPathsAndPlayFirstAsync(paths);
+            await _viewModel.AddPathsAndPlayFirstAsync(paths);
         }
         catch (Exception exception)
         {
             Log.Warning(exception, "Failed to process dropped media.");
-        }
-    }
-
-    private async Task AddPathsAndPlayFirstAsync(IEnumerable<string> paths)
-    {
-        var wasEmpty = _viewModel.Playlist.Items.Count == 0;
-        var result = await _viewModel.Playlist.AddPathsAsync(
-            paths,
-            recursive: true);
-        if (!result.IsSuccess || result.Value is not { Count: > 0 } added)
-        {
-            return;
-        }
-
-        var state = _viewModel.Player.PlaybackState;
-        if (wasEmpty
-            || state is PlaybackState.None
-                or PlaybackState.Stopped
-                or PlaybackState.Ended
-                or PlaybackState.Error)
-        {
-            await _viewModel.Player.OpenAsync(added[0].FilePath);
         }
     }
 
